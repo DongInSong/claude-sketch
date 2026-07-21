@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +20,7 @@ const opt = {
   host: '127.0.0.1',
   open: true,
   strictPort: false,
+  detach: false,
 };
 
 const args = process.argv.slice(2);
@@ -40,6 +43,7 @@ for (let i = 0; i < args.length; i++) {
   }
   else if (a === '--host') opt.host = need(++i, a);
   else if (a === '--strict-port') opt.strictPort = true;
+  else if (a === '--detach' || a === '-d') opt.detach = true;
   else if (a === '--open') opt.open = true;
   else if (a === '--no-open') opt.open = false;
   else if (a === '--version' || a === '-v') { console.log(PKG.version); process.exit(0); }
@@ -57,6 +61,7 @@ options
   -p, --project <dir>   project to watch                (default: current directory)
       --port <n>        port to serve on                (default: ${DEFAULT_PORT}, next free one if taken)
       --strict-port     fail instead of trying the next port
+  -d, --detach          run in the background and hand the terminal back
       --host <addr>     address to bind                 (default: 127.0.0.1)
       --open            open the browser                (default)
       --no-open         don't open the browser
@@ -67,6 +72,39 @@ Reads ~/.claude/projects/<dir-slug>/*.jsonl locally. Nothing leaves your machine
 }
 
 if (!fs.existsSync(opt.project)) die(`no such directory: ${opt.project}`);
+
+const freePort = (from) => new Promise((resolve) => {
+  const probe = (p, left) => {
+    if (!left) return resolve(null);
+    const s = net.createServer();
+    s.once('error', () => probe(p + 1, left - 1));
+    s.once('listening', () => s.close(() => resolve(p)));
+    s.listen(p, opt.host);
+  };
+  probe(from, PORT_TRIES);
+});
+
+// Background mode: pick the port here so the parent can print a URL that is
+// actually true, then hand the terminal back.
+if (opt.detach && !process.env.CLAUDE_SKETCH_CHILD) {
+  const port = opt.strictPort ? opt.port : await freePort(opt.port);
+  if (port === null) die(`no free port near ${opt.port}`);
+  const logPath = path.join(os.tmpdir(), `claude-sketch-${port}.log`);
+  const log = fs.openSync(logPath, 'a');
+  const passthrough = process.argv.slice(2)
+    .filter((a, i, all) => a !== '-d' && a !== '--detach'
+      && a !== '--port' && all[i - 1] !== '--port');
+  const child = spawn(process.execPath,
+    [fileURLToPath(import.meta.url), ...passthrough, '--port', String(port), '--strict-port'],
+    { detached: true, stdio: ['ignore', log, log], env: { ...process.env, CLAUDE_SKETCH_CHILD: '1' } });
+  child.unref();
+  console.log(`✳ claude-sketch v${PKG.version} — running in the background`);
+  console.log(`  open  http://localhost:${port}`);
+  console.log(`  pid   ${child.pid}`);
+  console.log(`  log   ${logPath}`);
+  console.log(`  stop  kill ${child.pid}`);
+  process.exit(0);
+}
 
 const project = new Project(opt.project);
 const server = createServer(project);
