@@ -88,6 +88,15 @@ npm i -g claude-sketch
 cd ~/dev/app && claude-sketch
 ```
 
+| option | |
+|---|---|
+| `-p, --project <dir>` | project to watch (default: current directory) |
+| `--port <n>` | port to serve on (default: 4517 — **walks to the next free one if it's taken**) |
+| `--strict-port` | fail instead of walking to the next port |
+| `--host <addr>` | address to bind (default: `127.0.0.1`; anything else prints a warning, because it hands your transcripts to the network) |
+| `--open` / `--no-open` | open the browser, or don't (default: open) |
+| `-v, --version` · `-h, --help` | the usual |
+
 Node 18+. **Zero runtime dependencies** — the whole thing is five small modules and
 one HTML file.
 
@@ -135,7 +144,7 @@ snaps back on the first byte.
 **Effect on Claude Code: none, by construction.** The tool only ever reads — there
 is no `writeFile`, `unlink` or `mkdir` anywhere in `lib/`. Transcripts are opened
 `'r'` and read by offset, which doesn't block Claude Code's appends. The server
-binds `127.0.0.1` only. Clicking a file asks before it opens anything, and
+binds `127.0.0.1` unless you ask otherwise. Clicking a file asks before it opens anything, and
 `POST /api/open` refuses paths outside your project, home or temp directories.
 
 ---
