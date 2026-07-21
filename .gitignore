@@ -2,3 +2,12 @@ node_modules/
 package-lock.json
 *.log
 .DS_Store
+
+# A screenshot of this tool shows real session titles — which are the prompts
+# you typed. Loose ones land at the repo root, so keep them out by default;
+# docs/ is a subdirectory and stays tracked.
+/*.png
+.playwright-mcp/
+
+# npm pack output
+*.tgz
