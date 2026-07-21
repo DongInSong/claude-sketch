@@ -70,15 +70,17 @@ Claude Code already writes every event to `~/.claude/projects/<slug>/<session>.j
 ## 🔒 Privacy
 
 Read-only by construction — no `writeFile`/`unlink`/`mkdir` anywhere in `lib/`. Binds
-`127.0.0.1`. Clicking a file **asks first**. The only outbound request is the Korean
-webfont; delete one `<link>` for full offline. 🏠
+`127.0.0.1`, and refuses any request that arrives under a domain name or from another
+origin. Clicking a file **asks first**. Zero outbound requests — fonts are bundled, so
+it works on a plane. 🏠
 
 ## 🎨 Details
 
 - **Language**: 🇬🇧 🇰🇷 🇯🇵 🇨🇳 — one row in the header, one object in `I18N` to add more.
-- **Font**: Excalifont (Excalidraw's hand) — **SIL Open Font License 1.1**, notice at
-  [`public/fonts/LICENSE-Excalifont.txt`](public/fonts/LICENSE-Excalifont.txt).
-  Swap it via the `--hand` CSS variable.
+- **Fonts**: Excalifont (Latin), Gaegu (Hangul), Klee One (Japanese), Ma Shan Zheng
+  (Chinese) — all **SIL Open Font License 1.1**, bundled and subset; see
+  [`public/fonts/README.md`](public/fonts/README.md) for what each covers and how to
+  rebuild. Swap any of them via the `--hand` CSS variable.
 - **`n calls · 0 files`** is real, not a bug — shell commands don't point at files.
 - Task duration = the longer of *spawn→result* and *the agent's own first→last call*
   (some transcripts write those 0.1 s apart 🙃).

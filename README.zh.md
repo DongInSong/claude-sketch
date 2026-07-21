@@ -70,14 +70,15 @@ Claude Code 早就把每个事件写进 `~/.claude/projects/<slug>/<会话>.json
 ## 🔒 隐私
 
 结构上只读 —— `lib/` 里没有任何 `writeFile`、`unlink`、`mkdir`。只绑定 `127.0.0.1`。
-点击文件会**先询问**。唯一的外部请求是韩文字体，删掉一行 `<link>` 即可完全离线。🏠
+并拒绝以域名到达或来自其他源的请求。点击文件会**先询问**。外部请求为零 —— 字体也一并打包，
+断网也能用。🏠
 
 ## 🎨 细节
 
 - **语言**：🇬🇧 🇰🇷 🇯🇵 🇨🇳 —— 页眉一行，新增一种就往 `I18N` 加一个对象。
-- **字体**：Excalifont（Excalidraw 的手写体）—— **SIL Open Font License 1.1**，
-  声明见 [`public/fonts/LICENSE-Excalifont.txt`](public/fonts/LICENSE-Excalifont.txt)。
-  改 `--hand` 变量即可替换。
+- **字体**：Excalifont（拉丁）、Gaegu（韩文）、Klee One（日文）、Ma Shan Zheng（中文）——
+  均为 **SIL Open Font License 1.1**，已做子集并随包分发。覆盖范围与重新生成方式见
+  [`public/fonts/README.md`](public/fonts/README.md)。改 `--hand` 变量即可替换。
 - **`n 次调用 · 0 个文件`** 不是 bug —— shell 命令本来就不指向文件。
 - task 耗时 = *启动→结果* 与 *智能体自身 首次→末次调用* 中**较长**的那个
   （有些记录把这两点写成相差 0.1 秒 🙃）。

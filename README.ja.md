@@ -70,15 +70,15 @@ tail し、`tool_use` + `message.model` + `message.usage` を取り出して SSE
 ## 🔒 プライバシー
 
 構造上リードオンリー — `lib/` のどこにも `writeFile`・`unlink`・`mkdir` なし。
-`127.0.0.1` にバインド。ファイルをクリックすると**まず確認**します。外部リクエストは
-ハングル用フォント 1 件だけで、`<link>` を 1 行消せば完全オフライン。🏠
+`127.0.0.1` にバインドし、ドメイン名で届いたリクエストや別オリジンからのリクエストは拒否します。
+ファイルをクリックすると**まず確認**します。外部リクエストはゼロ — フォントも同梱なので機内でも動きます。🏠
 
 ## 🎨 ディテール
 
 - **言語**: 🇬🇧 🇰🇷 🇯🇵 🇨🇳 — ヘッダーの 1 行、追加は `I18N` にオブジェクト 1 つ。
-- **書体**: Excalifont（Excalidraw の手書き） — **SIL Open Font License 1.1**、
-  表示は [`public/fonts/LICENSE-Excalifont.txt`](public/fonts/LICENSE-Excalifont.txt)。
-  `--hand` CSS 変数で差し替え可。
+- **書体**: Excalifont（ラテン）・Gaegu（ハングル）・Klee One（日本語）・Ma Shan Zheng（中国語） —
+  いずれも **SIL Open Font License 1.1**、サブセットして同梱。カバー範囲と再生成の手順は
+  [`public/fonts/README.md`](public/fonts/README.md)。`--hand` CSS 変数で差し替え可。
 - **`呼び出し n 回 · ファイル 0`** はバグではありません — シェルコマンドはファイルを指さないので。
 - task の所要時間 = *起動→結果* と *エージェント自身の 最初→最後* の**長い方**
   （記録によってはこの 2 点が 0.1 秒差 🙃）。
