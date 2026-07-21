@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # the three platforms this reads transcripts on, and the oldest Node the
+    # package claims to support (fs.readdirSync recursive lands in 18.17)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['18.17', '20', '22']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+      # a CRLF shebang published from a Windows checkout is unrunnable on
+      # macOS/Linux, so prove the packed bin still starts
+      - run: npm pack
+      - shell: bash
+        run: |
+          tar -xzf claude-sketch-*.tgz
+          node package/bin/claude-sketch.js --version
