@@ -204,9 +204,10 @@
   .mc{width:22px;height:22px;border:1.7px solid var(--ink3);position:relative;flex:none;
     border-radius:6px 9px 7px 10px / 9px 7px 10px 6px}
   .mc.un{border-style:dashed;opacity:.4}
-  .mc.now{outline:3px solid var(--accent);outline-offset:3px;animation:nowPulse 1.1s ease-in-out infinite}
+  .mc.warm{outline:2px solid color-mix(in srgb, var(--accent) 45%, transparent);outline-offset:2px}
+  .mc.now{outline:3.5px solid var(--accent);outline-offset:3px;animation:nowPulse 1.1s ease-in-out infinite}
   @keyframes nowPulse{0%,100%{outline-color:var(--accent);outline-offset:3px}
-    50%{outline-color:color-mix(in srgb, var(--accent) 30%, transparent);outline-offset:6px}}
+    50%{outline-color:color-mix(in srgb, var(--accent) 25%, transparent);outline-offset:8px}}
   .tmnow{position:absolute;pointer-events:none;border:3px solid var(--accent);
     border-radius:8px 12px 9px 13px / 12px 9px 13px 8px;
     animation:nowRing 1.1s ease-in-out infinite;z-index:3}
@@ -1109,8 +1110,11 @@ document.addEventListener('mousemove', e=>{
   dtip.style.left = Math.max(6, Math.min(innerWidth-tw-8, e.clientX+14))+'px';
   dtip.style.top = (e.clientY-th-12 < 4 ? e.clientY+16 : e.clientY-th-12)+'px';
 });
-const NOW_MS = 9000;                       // how long a touch stays highlighted
+const BUSY_MS = 45000;                     // no tool call for this long → idle, not working
+const NOW_MS = 20000;                      // the newest touch pulses this long
+const WARM_MS = 90000;                     // touched-lately files keep a quiet ring
 function isNow(p){ return !!(S.now && S.now.file === p && Date.now()-S.now.ts < NOW_MS); }
+function isWarm(fs){ return !!(fs.lastT && Date.now()-fs.lastT < WARM_MS); }
 function markTMNow(){                      // ring rides above the canvas: no redraw to pulse
   const el = $('tmNow');
   const r = (S.now && Date.now()-S.now.ts < NOW_MS)
@@ -1217,6 +1221,7 @@ function updateFog(){
         el.dataset.tip = fileTip(p, fs, true);
         el.classList.add('openable');
         if (isNow(p)) el.classList.add('now');
+        else if (isWarm(fs)) el.classList.add('warm');
         if (fs.gone) el.classList.add('gone');
         if (fs.errs) el.classList.add('err');
         el.addEventListener('click', (e)=> openTarget(p, e));
@@ -1699,9 +1704,8 @@ function renderAgents(){
     b.addEventListener('click', ()=> setFilter(nm));
     box.appendChild(b);
     if (nm === 'main'){                    // is the session working right now, and on what
-      const sess = SESSIONS.find(x=>x.id===S.id);
-      const live = sess && sess.active;
-      const bits = [live ? `<span class="run">${t('mainRun')}</span>` : t('mainIdle')];
+      const busy = a.lastTs && Date.now() - a.lastTs < BUSY_MS;
+      const bits = [busy ? `<span class="run">${t('mainRun')}</span>` : t('mainIdle')];
       if (a.lastOp){
         const f = a.lastOp === 'bash' ? String(a.lastFile).slice(0,28)+'…' : String(a.lastFile).split('/').pop();
         bits.push(`<span class="q">${esc(t('lastDo', {op:(OP_LABEL[a.lastOp]||a.lastOp).toLowerCase(), f}))}</span>`);
@@ -1724,9 +1728,8 @@ function renderAgents(){
       const span = a.lastTs && a.firstTs ? a.lastTs - a.firstTs : 0;
       const dur = Math.max(paired, span);
       const started = tk.start || a.firstTs;
-      const liveSess = SESSIONS.find(x=>x.id===S.id)?.active;
-      const running = (tk.start && !tk.end) ||
-        (!tk.start && liveSess && a.lastTs && Date.now()-a.lastTs < 60000);
+      const stillMoving = a.lastTs && Date.now() - a.lastTs < 2*60e3;
+      const running = !tk.end && stillMoving;
       const bits = [];
       if (tk.desc) bits.push(`<span class="q">“${esc(tk.desc)}”</span>`);
       if (running) bits.push(`<span class="run">${t('taskRun')}</span>`);
@@ -1919,7 +1922,7 @@ setInterval(()=>{                       // let the live marker fade on its own w
   document.querySelectorAll('.mc.now').forEach(e=>e.classList.remove('now'));
   $('tmNow').hidden = true;
 }, 1000);
-setInterval(loadSessions, 15000);
+setInterval(loadSessions, 10000);   // keeps the live/done badges honest
 addEventListener('resize', ()=>{ if (S && S.ready) renderAll(); });
 
 /* ══ boot ══ */
