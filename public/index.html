@@ -1656,6 +1656,15 @@ function fmtAgo(ms){
   const h = Math.round(m/60);
   return h < 24 ? t('agoH', {n:h}) : t('agoD', {n:Math.round(h/24)});
 }
+// For the open session, "live" means the same thing "working" does — the last
+// tool call, not when the file was last written to.
+function isLive(sess){
+  if (S && S.id === sess.id && S.ready){
+    const main = S.agents.get('main');
+    if (main && main.lastTs) return Date.now() - main.lastTs < BUSY_MS;
+  }
+  return sess.active;
+}
 let sessExpanded = false;
 const SESS_SHOWN = 5;
 function renderSessLinks(){
@@ -1670,13 +1679,14 @@ function renderSessLinks(){
 
   for (const sess of shown){
     const age = now - sess.mtimeMs;
+    const live = isLive(sess);
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'slink'
       + (S && S.id===sess.id ? ' on' : '')
-      + (sess.active ? ' live' : age < 12*3600e3 ? ' fresh' : ' old');
+      + (live ? ' live' : age < 12*3600e3 ? ' fresh' : ' old');
     b.innerHTML = `${esc(sess.title || sess.id.slice(0,8))} <span class="st">`
-      + (sess.active ? t('liveNow') : t('doneAt', {a: fmtAgo(age)})) + `</span>`;
+      + (live ? t('liveNow') : t('doneAt', {a: fmtAgo(age)})) + `</span>`;
     b.addEventListener('click', ()=>selectSession(sess.id));
     box.appendChild(b);
   }
@@ -1857,7 +1867,8 @@ function renderAll(){
   const rn = $('rootNote');
   if (ROOT){ rn.innerHTML = t('underRoot', {p: esc(ROOT)+'/'}); rn.hidden = false; }
   else rn.hidden = true;
-  renderAgents(); renderStats(); renderRows(); renderNotes(); updateFog(); drawTM(); markTMNow(); renderNoFiles();
+  renderSessLinks(); renderAgents(); renderStats(); renderRows(); renderNotes();
+  updateFog(); drawTM(); markTMNow(); renderNoFiles();
 }
 
 /* ══ foldable sections ══ */
