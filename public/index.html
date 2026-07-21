@@ -884,7 +884,11 @@ function applyEvent(ev, silent, replay){
   fs.ops[ev.op] = (fs.ops[ev.op]||0)+1; fs.total++;
   if (ev.plus) fs.plus += ev.plus;
   if (ev.minus) fs.minus += ev.minus;
-  if (ev.op === 'del') fs.gone = true;
+  // Deleted means "the last thing that happened to it was an rm". A file that
+  // gets read or written afterwards is plainly back — restored from git, or the
+  // rm never landed — and leaving it struck through says something untrue.
+  // Events arrive in order, so the latest one is the answer.
+  fs.gone = ev.op === 'del';
   fs.agents.add(ev.agent); fs.lastT = ev.ts;
   if (ev.op==='read') fs.reads++;
   if (!silent){
@@ -1259,16 +1263,48 @@ function marker(c, box, seed, prog, col){
   c.restore();
 }
 
+// Paper rubbed in behind something, so it stays legible over a hatched tile.
+// Not a filled box — a handful of overlapping passes, thick and a little past
+// the edges, the way you would scrub a space clear with the side of a pencil.
+// Paper colour rather than white, so it follows the theme into the dark.
+function paperUnder(c, x, y, w2, h2, rnd, alpha){
+  c.save();
+  c.strokeStyle = PAL.paper;
+  c.lineCap = 'round';
+  const n = Math.max(2, Math.round(h2/6));
+  c.lineWidth = (h2/n)*2.1;
+  for (let i = 0; i < n; i++){
+    const yy = y + h2*(i+0.5)/n + (rnd()-0.5)*2.2;
+    c.globalAlpha = alpha*(0.55 + rnd()*0.2);      // uneven, so overlaps show
+    c.beginPath();
+    c.moveTo(x - 4 - rnd()*5, yy + (rnd()-0.5)*2);
+    c.lineTo(x + w2 + 4 + rnd()*5, yy + (rnd()-0.5)*2);
+    c.stroke();
+  }
+  c.restore();
+}
+
 // arrow + "지금!" — drawn wherever there is room, flipping sides near an edge
 const labelLeft = (r) => r.x > 70;
 function pointAt(c, r, w, seed, alpha){
-  const rnd = mulberry(seed);
   const left = labelLeft(r);
   const tx = left ? r.x-7 : r.x+r.w+7, ty = r.y + Math.min(r.h/2, 14);
   const len = 30, sx = tx + (left ? -len : len), sy = ty - len*0.8;
   if (sx < -PAD_X+4 || sx > w+PAD_X-4 || sy < -PAD_Y+16) return;
   c.save();
-  c.strokeStyle = liveCol(); c.lineWidth = 2.6; c.lineCap = 'round';
+  c.lineCap = 'round';
+
+  // the same seed twice: the paper underneath follows the arrow's own wobble
+  c.globalAlpha = alpha*0.8;
+  c.strokeStyle = PAL.paper;
+  const under = mulberry(seed);
+  for (const lw of [9, 6]){
+    c.lineWidth = lw;
+    c.beginPath(); wavyLine(c, sx, sy, tx, ty, under, 2); c.stroke();
+  }
+
+  const rnd = mulberry(seed);
+  c.strokeStyle = liveCol(); c.lineWidth = 2.6;
   c.globalAlpha = alpha;
   c.beginPath(); wavyLine(c, sx, sy, tx, ty, rnd, 2); c.stroke();
   const dx = (tx-sx)/len, dy = (ty-sy)/len;                    // two-stroke head
@@ -1277,12 +1313,16 @@ function pointAt(c, r, w, seed, alpha){
     const hy = ty + (dx*Math.sin(a) + dy*Math.cos(a))*11;
     c.beginPath(); wavyLine(c, tx, ty, hx, hy, rnd, 1.4); c.stroke();
   }
+
   c.translate(sx, sy - 5);
   c.rotate(-0.13 + (rnd()-0.5)*0.06);
   c.font = '700 16px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
-  c.fillStyle = liveCol(); c.globalAlpha = alpha;
   c.textAlign = left ? 'right' : 'left'; c.textBaseline = 'bottom';
-  c.fillText(liveWord(), 0, 0);
+  const word = liveWord();
+  const tw = c.measureText(word).width;
+  paperUnder(c, left ? -tw : 0, -15, tw, 19, rnd, alpha);
+  c.fillStyle = liveCol(); c.globalAlpha = alpha;
+  c.fillText(word, 0, 0);
   c.restore();
 }
 
