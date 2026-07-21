@@ -106,7 +106,11 @@
   .sessline{margin:20px 0 0;font-size:17px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
   /* sessions belong under the folder, not beside it: the folder says where you
      are looking, the list says which run — one is a heading for the other */
-  #sessLinks{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:3px}
+  /* min-height so the row keeps its space whatever it is saying — an empty
+     list swapping for a message used to move everything below it */
+  #sessLinks{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;
+    margin-top:3px;min-height:28px}
+  #sessLinks.stale .slink{opacity:.45}      /* what you are looking at is a last-known state */
   .sessline b{color:var(--ink);font-size:15px}
   /* the watched folder: a pinned scrap you can swap */
   .folder{position:relative;color:var(--ink);font-size:15px;padding:2px 10px;white-space:nowrap}
@@ -494,6 +498,7 @@ const I18N = {
     nLoopT: 'edit → run loop detected', nLoopW: 'healthy rhythm',
     footer: 'claude-sketch · reads ~/.claude/projects locally · nothing leaves this machine',
     noSessions: 'no sessions for this folder yet — run Claude Code here first',
+    backendGone: 'claude-sketch stopped answering — is it still running?',
     connecting: 'connecting…',
   },
   ko: {
@@ -558,6 +563,7 @@ const I18N = {
     nLoopT: '수정 → 실행 루프 확인', nLoopW: '건강한 리듬',
     footer: 'claude-sketch · ~/.claude/projects 로컬 읽기 전용 · 외부 전송 없음',
     noSessions: '이 폴더의 세션이 아직 없습니다 — 여기서 Claude Code를 먼저 실행하세요',
+    backendGone: 'claude-sketch가 응답하지 않습니다 — 아직 켜져 있나요?',
     connecting: '연결 중…',
   },
   ja: {
@@ -622,6 +628,7 @@ const I18N = {
     nLoopT: '編集 → 実行のループを確認', nLoopW: '健全なリズム',
     footer: 'claude-sketch · ~/.claude/projects をローカルで読むだけ · 外部には何も送りません',
     noSessions: 'このフォルダのセッションはまだありません — まず Claude Code をここで実行してください',
+    backendGone: 'claude-sketch が応答しません — まだ起動していますか？',
     connecting: '接続中…',
   },
   zh: {
@@ -686,6 +693,7 @@ const I18N = {
     nLoopT: '发现 编辑 → 运行 的循环', nLoopW: '健康的节奏',
     footer: 'claude-sketch · 仅在本地读取 ~/.claude/projects · 不向外发送任何内容',
     noSessions: '该文件夹还没有会话 — 请先在这里运行 Claude Code',
+    backendGone: 'claude-sketch 没有响应 —— 它还在运行吗？',
     connecting: '连接中…',
   },
 };
@@ -773,6 +781,7 @@ const heatScore = (fs, nowIx) => heatIn(fs, nowIx, COLS);
 let SESSIONS = [];
 let PRICING = null, EDITOR = 'system';
 let PROJECT = null, PROJECTS = [];
+let OFFLINE = false;      // the server stopped answering; what is on screen is the last we knew
 // Handed to this page by the server; every API call carries it back. EventSource
 // can't set headers, so it rides in the query string.
 const TOKEN = window.__CS_TOKEN__ || '';
@@ -799,6 +808,7 @@ function newState(id){
     firstTs:0,            // first event — gives the session's working span
     tasks:new Map(),      // tool_use id -> {desc, sub, start, end, agent}
     all:[],               // raw op/res events — replayed when the agent filter changes
+    seen:new Set(),       // their ids, so a reconnect's replayed backlog lands once
     filter:null,          // null = every agent, else an agent name
     n:0, lastEv:null };
 }
@@ -846,8 +856,18 @@ function applyEvent(ev, silent, replay){
   }
   if (ev.t === 'title'){ const s = SESSIONS.find(x=>x.id===S.id); if (s){ s.title = ev.title; renderSessLinks(); } return; }
   if (!replay && (ev.t === 'op' || ev.t === 'res')){
+    // A dropped connection reconnects to a server that starts its backlog from
+    // the top, so everything already on screen arrives a second time. Counting
+    // it twice would double every number on the page. (usage/model/title carry
+    // absolute values, so they can be applied again harmlessly.)
+    const key = ev.t + ':' + ev.id;
+    if (S.seen.has(key)) return;
+    S.seen.add(key);
     S.all.push(ev);
-    if (S.all.length > 60000) S.all.splice(0, 10000);
+    if (S.all.length > 60000){
+      S.all.splice(0, 10000);
+      S.seen = new Set(S.all.map(e => e.t + ':' + e.id));
+    }
   }
   if (!passes(ev)) return;
   if (ev.t === 'res'){
@@ -1004,14 +1024,30 @@ async function switchProject(root){
 }
 
 /* ══ data loading ══ */
+// Restarting the server issues a new token, which leaves an open tab holding a
+// dead one: every call comes back 403 and the page quietly stops updating.
+// Nothing on screen is recoverable in that state, so fetch a fresh page — once,
+// guarded against a loop if the 403 turns out to be something else.
+async function api(path){
+  const res = await fetch(path);
+  if (res.status === 403){
+    const last = Number(sessionStorage.getItem('cs-reloaded') || 0);
+    if (Date.now() - last > 10000){
+      sessionStorage.setItem('cs-reloaded', String(Date.now()));
+      location.reload();
+    }
+    throw new Error('stale token');
+  }
+  return res.json();
+}
 async function loadMeta(){
   try{
-    const m = await (await fetch('/api/meta' + q())).json();
+    const m = await api('/api/meta' + q());
     PROJECT = m.project;
     PRICING = m.pricing; EDITOR = m.editor || 'system';
     $('projPick').addEventListener('click', ()=> pickerOpen ? closePicker() : openPicker());
     try{
-      const r = await (await fetch('/api/projects' + q())).json();
+      const r = await api('/api/projects' + q());
       PROJECTS = r.projects || [];
     }catch(e){ PROJECTS = []; }
     // a reload should stay on the folder you picked, not snap back to --project
@@ -1023,7 +1059,7 @@ async function loadMeta(){
 }
 async function loadUniverse(){
   try{
-    const u = await (await fetch('/api/universe' + q())).json();
+    const u = await api('/api/universe' + q());
     const dirs = new Map();
     for (const p of u.files){
       const d = dirOf(p);
@@ -1039,12 +1075,16 @@ async function loadUniverse(){
 }
 async function loadSessions(){
   try{
-    const r = await (await fetch('/api/sessions' + q())).json();
+    const r = await api('/api/sessions' + q());
     SESSIONS = r.sessions || [];
-  }catch(e){ SESSIONS = []; }
+    OFFLINE = false;
+  }catch(e){
+    // the sessions did not go anywhere, the server did — keep them on screen
+    // and say what actually happened
+    OFFLINE = true;
+  }
   renderSessLinks();
   if (!S && SESSIONS.length) selectSession((SESSIONS.find(s=>s.active) || SESSIONS[0]).id);
-  if (!SESSIONS.length) $('sessLinks').innerHTML = `<span class="empty">${t('noSessions')}</span>`;
 }
 
 function selectSession(id){
@@ -1973,6 +2013,16 @@ function renderSessLinks(){
     m.textContent = sessExpanded ? t('lessSess') : t('moreSess', {n: hidden});
     m.addEventListener('click', ()=>{ sessExpanded = !sessExpanded; renderSessLinks(); });
     box.appendChild(m);
+  }
+  // Said here rather than by whoever last fetched, so that every repaint agrees:
+  // the message used to be added after this function had already wiped the row,
+  // which made it blink in and out and shove the page around.
+  box.classList.toggle('stale', OFFLINE);
+  if (OFFLINE || !SESSIONS.length){
+    const note = document.createElement('span');
+    note.className = 'empty';
+    note.textContent = OFFLINE ? t('backendGone') : t('noSessions');
+    box.appendChild(note);
   }
 }
 let tasksFolded = (()=>{ try{ return localStorage.getItem('cs-fold')==='1'; }catch(e){ return false; } })();
