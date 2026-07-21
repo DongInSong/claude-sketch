@@ -60,10 +60,12 @@ Claude Code already writes every event to `~/.claude/projects/<slug>/<session>.j
 
 | | |
 |---|---|
-| idle CPU | **0.08 %** of a core |
-| memory | ~55 MB (worst seen: 105 MB) |
+| idle CPU, browser attached | **0.06 %** of a core |
+| memory | ~60 MB (worst seen: 105 MB) |
 | 260 MB transcript, cold parse | **1.7 s** |
-| full browser re-render | ~26 ms |
+| polled endpoints (`/api/sessions`) | 1–5 ms |
+| switching to a 115-session project | 50 ms, then ~1 ms |
+| full browser re-render | ~30 ms, 4 MB heap |
 
 ## 🔒 Privacy
 
