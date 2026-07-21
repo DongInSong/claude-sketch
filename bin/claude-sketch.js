@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Project } from '../lib/project.js';
 import { createServer } from '../lib/server.js';
+import { openBrowser, openedRecently, markOpened } from '../lib/browser.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
@@ -19,6 +20,7 @@ const opt = {
   port: DEFAULT_PORT,
   host: '127.0.0.1',
   open: true,
+  openExplicit: false,
   strictPort: false,
   detach: false,
 };
@@ -44,7 +46,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--host') opt.host = need(++i, a);
   else if (a === '--strict-port') opt.strictPort = true;
   else if (a === '--detach' || a === '-d') opt.detach = true;
-  else if (a === '--open') opt.open = true;
+  else if (a === '--open') { opt.open = true; opt.openExplicit = true; }   // asked for it: always open
   else if (a === '--no-open') opt.open = false;
   else if (a === '--version' || a === '-v') { console.log(PKG.version); process.exit(0); }
   else if (a === '--help' || a === '-h') { help(); process.exit(0); }
@@ -63,8 +65,10 @@ options
       --strict-port     fail instead of trying the next port
   -d, --detach          run in the background and hand the terminal back
       --host <addr>     address to bind                 (default: 127.0.0.1)
-      --open            open the browser                (default)
+      --open            open a tab even if one is already up
       --no-open         don't open the browser
+                        (by default a tab opens unless one was opened for this
+                         port in the last ten minutes — it reloads itself)
   -v, --version         print the version
   -h, --help            print this
 
@@ -119,7 +123,7 @@ server.on('error', (err) => {
   if (err.code !== 'EADDRINUSE') die(err.message);
   if (opt.strictPort) die(`port ${opt.port} is already in use (--strict-port)`);
   if (++attempt >= PORT_TRIES) die(`ports ${opt.port - attempt}–${opt.port} are all in use`);
-  console.log(`  port ${opt.port} is busy, trying ${opt.port + 1}…`);
+  console.log(`  port ${opt.port} is busy — another claude-sketch may be on it; trying ${opt.port + 1}…`);
   server.listen(++opt.port, opt.host);
 });
 
@@ -134,16 +138,13 @@ server.listen(opt.port, opt.host, () => {
   console.log(`  open        ${url}`);
   if (opt.host !== '127.0.0.1' && opt.host !== 'localhost')
     console.log(`  ⚠ bound to ${opt.host} — anyone on this network can read these transcripts`);
-  if (opt.open) {
-    const cmd = process.platform === 'darwin' ? 'open'
-      : process.platform === 'win32' ? 'explorer.exe' : 'xdg-open';
-    // a missing xdg-open surfaces as an async 'error' event, which would
-    // otherwise be an unhandled throw — the URL is printed above anyway
-    try {
-      const b = spawn(cmd, [url], { stdio: 'ignore', detached: true });
-      b.on('error', () => {});
-      b.unref();
-    } catch { /* the URL is printed anyway */ }
+  if (opt.open && !opt.openExplicit && openedRecently(opt.port)) {
+    // the tab from last time is still the one you want — it notices the server
+    // came back and reloads itself
+    console.log(`  (a tab is already open on this port — it will pick this up by itself)`);
+  } else if (opt.open) {
+    openBrowser(url);
+    markOpened(opt.port);
   }
 });
 
