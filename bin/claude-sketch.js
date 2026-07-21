@@ -141,25 +141,33 @@ server.listen(opt.port, opt.host, () => {
   console.log(`  project     ${project.root}`);
   console.log(`  transcripts ${project.dir}`);
   console.log(`  sessions    ${list.sessions ? list.sessions.length : 0} found${list.error ? ' (' + list.error + ')' : ''}`);
-  console.log(`  open        ${url}`);
+  console.log(`  serving     ${url}`);
   if (opt.host !== '127.0.0.1' && opt.host !== 'localhost')
     console.log(`  ⚠ bound to ${opt.host} — anyone on this network can read these transcripts`);
+
+  const ready = () => console.log(`\n  watching · ctrl-c to stop`);
   const show = () => { openBrowser(url); markOpened(opt.port); };
-  if (!opt.open) return;
-  if (opt.openExplicit || !openedRecently(opt.port)) return show();
+
+  if (!opt.open) return ready();
+  if (opt.openExplicit || !openedRecently(opt.port)) {
+    show();
+    console.log(`\n  ✓ opened a tab`);
+    return ready();
+  }
 
   // We opened a tab for this port not long ago. It may still be there, holding
   // your scroll position and waiting to reconnect — or you may have closed it.
   // Listen instead of assuming: an open tab knocks within a few seconds.
-  console.log(`  …checking whether that tab is still open`);
+  console.log(`\n  checking browser…`);
   setTimeout(() => {
     if (knocked) {
-      console.log(`  it is — leaving it to reload itself`);
       markOpened(opt.port);
+      console.log(`  ✓ tab already open — it reloads itself`);
     } else {
-      console.log(`  it isn't — opening a new one`);
       show();
+      console.log(`  ✓ no tab there — opened one`);
     }
+    ready();
   }, TAB_WAIT_MS);
 });
 
