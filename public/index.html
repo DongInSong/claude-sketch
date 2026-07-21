@@ -104,6 +104,9 @@
   .topctl button.on{color:var(--accent)}
 
   .sessline{margin:20px 0 0;font-size:17px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+  /* sessions belong under the folder, not beside it: the folder says where you
+     are looking, the list says which run — one is a heading for the other */
+  #sessLinks{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:3px}
   .sessline b{color:var(--ink);font-size:15px}
   /* the watched folder: a pinned scrap you can swap */
   .folder{position:relative;color:var(--ink);font-size:15px;padding:2px 10px;white-space:nowrap}
