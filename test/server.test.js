@@ -69,6 +69,22 @@ test('an unknown project root is refused rather than opened', async (t) => {
   assert.equal(res.status, 404);
 });
 
+test('the page\'s modules are served, and only those', async (t) => {
+  const { server, base } = await boot();
+  t.after(() => server.close());
+
+  for (const name of ['paths.js', 'cost.js', 'treemap.js']) {
+    const res = await fetch(`${base}/lib/${name}`);
+    assert.equal(res.status, 200, name);
+    assert.match(res.headers.get('content-type'), /javascript/);
+    assert.match(await res.text(), /export/);
+  }
+  assert.equal((await fetch(`${base}/lib/nope.js`)).status, 404);
+  assert.equal((await fetch(`${base}/lib/paths.txt`)).status, 404);
+  // basename only: a walk out of public/ resolves to a name that isn't there
+  assert.equal((await fetch(`${base}/lib/..%2f..%2fpackage.json`)).status, 404);
+});
+
 test('the file universe comes back as slash-separated relative paths', async (t) => {
   const { server, base, token } = await boot();
   t.after(() => server.close());

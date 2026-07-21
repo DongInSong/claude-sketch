@@ -420,7 +420,10 @@
   <footer data-i18n="footer"></footer>
 </div>
 
-<script>
+<script type="module">
+import { dirOf, isWastePath, shortDir, computeRoot, stripRoot as rootStrip, shortModel } from '/lib/paths.js';
+import { rateFor as rateIn, costOf as costIn, fmtUsd, fmtTok } from '/lib/cost.js';
+import { squarify, heatScore as heatIn } from '/lib/treemap.js';
 (() => {
 "use strict";
 
@@ -728,36 +731,11 @@ function lineDelta(fs){
   return (fs.plus ? `<span class="pl">+${fs.plus}</span>` : '')
        + (fs.minus ? `<span class="mn">−${fs.minus}</span>` : '');
 }
-function rateFor(model){
-  if (!PRICING || !model) return null;
-  const key = Object.keys(PRICING.models).find(k => model.toLowerCase().includes(k));
-  return key ? PRICING.models[key] : null;
-}
-function costOf(a){                      // → {usd, known} for one agent
-  const r = rateFor(a.model);
-  if (!r) return {usd: 0, known: false};
-  const M = 1e6;
-  const usd = (a.fresh/M)*r.in
-            + (a.cw/M)*r.in*(PRICING.cacheWriteFactor ?? 1.25)
-            + (a.cr/M)*r.in*(PRICING.cacheReadFactor ?? 0.1)
-            + (a.tout/M)*r.out;
-  return {usd, known: true};
-}
-function fmtUsd(v){ return v >= 10 ? '$'+v.toFixed(0) : v >= 0.01 ? '$'+v.toFixed(2) : '<$0.01'; }
-function fmtTok(n){ return n>=1e6 ? (n/1e6).toFixed(1)+'M' : n>=1000 ? (n/1000).toFixed(1)+'k' : String(n); }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 function hash(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))|0; } return Math.abs(h); }
 function mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t2=Math.imul(a^a>>>15,1|a);
   t2=t2+Math.imul(t2^t2>>>7,61|t2)^t2; return ((t2^t2>>>14)>>>0)/4294967296; }; }
-function dirOf(p){
-  if (p.startsWith('web: ') || p.startsWith('http')) return '(web)';
-  return p.includes('/') ? p.split('/').slice(0,-1).join('/') : '(root)';
-}
-function isWastePath(p){
-  return /(^|\/)(node_modules|\.deps|\.venv|venv|__pycache__|dist|build|\.cache|data\/cache)(\/|$)/.test(p);
-}
 function domOp(ops){ let bk=null,bv=-1; for(const k in ops){ if(ops[k]>bv){bv=ops[k];bk=k;} } return bk; }
-function shortModel(m){ return String(m||'').replace(/^claude-/,'').replace(/-\d{8}$/,''); }
 // claude-opus-4-8 → "Opus 4.8"; the family decides the badge's rank
 const TIERS = [
   [/fable|mythos/i, 'm-fable',  '✦'],
@@ -778,32 +756,15 @@ function modelBadge(m){
   const cls = hit ? hit[1] : 'm-other', mark = hit ? hit[2] : '';
   return `<span class="mdl ${cls}">${mark?`<span class="tier">${mark}</span>`:''}${esc(prettyModel(m))}</span>`;
 }
-function shortDir(d, keep){                 // '/a/b/c/d/' → '…/c/d'
-  if (d.startsWith('(')) return d;
-  const seg = d.split('/').filter(Boolean);
-  return seg.length > (keep||2) ? '…/' + seg.slice(-(keep||2)).join('/') : d;
-}
 /* every folder shares the same leading segments → show them once, strip from labels */
 let ROOT = '';
-function computeRoot(dirs){
-  const rel = dirs.filter(d => d && !d.startsWith('(') && !d.startsWith('/'));
-  if (rel.length < 2) return '';
-  let pre = rel[0].split('/');
-  for (const d of rel.slice(1)){
-    const seg = d.split('/');
-    let i = 0;
-    while (i < pre.length && i < seg.length && pre[i] === seg[i]) i++;
-    pre = pre.slice(0, i);
-    if (!pre.length) return '';
-  }
-  return pre.join('/');
-}
-function stripRoot(d){
-  if (!ROOT || d.startsWith('(')) return d;
-  if (d === ROOT) return './';
-  return d.startsWith(ROOT+'/') ? d.slice(ROOT.length+1) : d;
-}
-function dirLabel(d, keep){ return shortDir(stripRoot(d), keep); }
+// ROOT, PRICING and COLS were implicit arguments; the modules take them properly,
+// and these keep every call site reading the way it did.
+const stripRoot = (d) => rootStrip(d, ROOT);
+const dirLabel = (d, keep) => shortDir(stripRoot(d), keep);
+const rateFor = (model) => rateIn(model, PRICING);
+const costOf = (a) => costIn(a, PRICING);
+const heatScore = (fs, nowIx) => heatIn(fs, nowIx, COLS);
 
 /* ══ state ══ */
 let SESSIONS = [];
@@ -1113,11 +1074,6 @@ function scheduleRender(){
 }
 
 /* ══ fog map ══ */
-function heatScore(fs, nowIx){
-  let sc = 0;
-  for (let i=0;i<COLS;i++){ const n = fs.hb[nowIx-i]; if (n) sc += n*Math.pow(0.9, i); }
-  return sc + fs.total*0.04;
-}
 /* structured doodle tooltip: title + label/value rows + optional note & flag */
 function tipBox(title, rows, opt){
   opt = opt || {};
@@ -1556,36 +1512,6 @@ function updateFog(){
 /* ══ treemap — crayon ══ */
 const tm = $('tm'), tmx = tm.getContext('2d');
 let TM_RECTS = [];
-function squarify(items, x, y, w, h){
-  let i = 0;
-  while (i < items.length && w > 0.5 && h > 0.5){
-    const horiz = w >= h;
-    const side = horiz ? h : w;
-    const total = items.slice(i).reduce((a,b)=>a+b.wt,0);
-    const area = w*h;
-    let rowSum = 0, best = Infinity, count = 1;
-    for (let j=i; j<items.length; j++){
-      rowSum += items[j].wt;
-      const thick = (rowSum/total)*area/side;
-      let worst = 0;
-      for (let k=i; k<=j; k++){
-        const len = items[k].wt/rowSum*side;
-        worst = Math.max(worst, thick/Math.max(1e-6,len), len/Math.max(1e-6,thick));
-      }
-      if (worst <= best){ best = worst; count = j-i+1; } else break;
-    }
-    const rowW = items.slice(i, i+count).reduce((a,b)=>a+b.wt,0);
-    const thick = (rowW/total)*area/side;
-    let off = 0;
-    for (let k=i; k<i+count; k++){
-      const len = items[k].wt/rowW*side;
-      items[k].rect = horiz ? {x, y:y+off, w:thick, h:len} : {x:x+off, y, w:len, h:thick};
-      off += len;
-    }
-    if (horiz){ x += thick; w -= thick; } else { y += thick; h -= thick; }
-    i += count;
-  }
-}
 function wavyLine(c, x1, y1, x2, y2, rnd, wob){
   const dx = x2-x1, dy = y2-y1, len = Math.hypot(dx,dy) || 1;
   const nx = -dy/len, ny = dx/len;
