@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "A crayon sketch of what Claude Code is touching right now — live file exploration, models and token telemetry, read straight from local session JSONL.",
   "license": "MIT",
+  "author": "Donnie Song",
+  "homepage": "https://github.com/DongInSong/claude-sketch#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/DongInSong/claude-sketch.git" },
+  "bugs": { "url": "https://github.com/DongInSong/claude-sketch/issues" },
   "type": "module",
   "bin": {
     "claude-sketch": "bin/claude-sketch.js"
@@ -13,8 +17,11 @@
     "public",
     "README.md"
   ],
+  "scripts": {
+    "test": "node --test test/"
+  },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.17"
   },
   "keywords": [
     "claude",

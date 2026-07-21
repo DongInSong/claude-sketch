@@ -1,0 +1,6 @@
+# npm pack ships the working tree as-is, and a CRLF shebang makes the published
+# bin unrunnable on macOS/Linux ("env: 'node\r': No such file"). Force LF so a
+# publish from a Windows checkout is identical to one from anywhere else.
+* text=auto eol=lf
+*.png binary
+*.woff2 binary
