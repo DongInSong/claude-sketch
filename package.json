@@ -1,0 +1,26 @@
+{
+  "name": "claude-sketch",
+  "version": "0.1.0",
+  "description": "A crayon sketch of what Claude Code is touching right now — live file exploration, models and token telemetry, read straight from local session JSONL.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "claude-sketch": "bin/claude-sketch.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "public",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "visualization",
+    "observability",
+    "heatmap"
+  ]
+}

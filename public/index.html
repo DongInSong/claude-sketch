@@ -1,0 +1,1839 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-sketch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28' fill='%23C15F3C'%3E%E2%9C%B3%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* Excalidraw's handwriting face, bundled locally — no request leaves the machine.
+     Swap --hand below for a Google-Fonts alternative (Kalam, Patrick Hand, …). */
+  @font-face{
+    font-family:"Excalifont";
+    src:url("/fonts/Excalifont-Regular.woff2") format("woff2");
+    font-weight:400 800;      /* single weight; bold is synthesised, which reads as thicker crayon */
+    font-display:swap;
+  }
+</style>
+<style>
+  :root{
+    /* the one place to change the handwriting face */
+    --hand:"Excalifont","Gaegu","Segoe Print","Comic Sans MS","Chalkboard SE","Marker Felt","Apple SD Gothic Neo","Malgun Gothic",cursive;
+    color-scheme: light;
+    --paper:#FAF6EC; --paper2:#F1EBDB; --grain:rgba(60,50,30,.05);
+    --ink:#3A3428; --ink2:#6E6553; --ink3:#A29781;
+    --accent:#C15F3C; --heat:#C1553C;
+    --op-read:#2a78d6; --op-grep:#4a3aa7; --op-edit:#1baf7a; --op-bash:#eda100;
+    --good:#1a7f37; --warn:#9a6700; --bad:#c62f2e;
+    --gold1:#9A6910; --gold2:#D2A02C; --gold3:#6E4708;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      color-scheme: dark;
+      --paper:#2A2A26; --paper2:#232320; --grain:rgba(240,235,215,.04);
+      --ink:#EDE8DA; --ink2:#B5AE9C; --ink3:#7E7867;
+      --accent:#E08B6D; --heat:#E08B6D;
+      --op-read:#3987e5; --op-grep:#9085e9; --op-edit:#199e70; --op-bash:#c98500;
+      --good:#4cae66; --warn:#d9a53e; --bad:#e66767;
+      --gold1:#E8C071; --gold2:#FFE9A8; --gold3:#C79236;
+    }
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--paper);
+    background-image:radial-gradient(var(--grain) 1px, transparent 1.4px);
+    background-size:6px 6px;
+    color:var(--ink);
+    font:20px/1.5 var(--hand);
+  }
+  .sheet{max-width:880px;margin:0 auto;padding:30px 22px 50px}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:8px}
+  ::selection{background:color-mix(in srgb, var(--accent) 25%, transparent)}
+
+  .hline{height:2.5px;background:var(--ink3);border-radius:99px;opacity:.5;margin:24px 0;filter:url(#squiggle)}
+
+  header{display:flex;align-items:flex-start;gap:12px}
+  h1{font-size:32px;margin:0;letter-spacing:.01em}
+  h1 .spark{color:var(--accent);display:inline-block;transform:rotate(-8deg)}
+  h1 .lt{color:var(--accent)}
+  .tag{margin:0;color:var(--ink3);font-size:15px}
+  .topctl{margin-left:auto;display:flex;gap:14px;align-items:center;padding-top:6px}
+  .topctl button{color:var(--ink2);text-decoration:underline wavy 1.2px;text-underline-offset:4px;font-size:17px}
+  .topctl button:hover{color:var(--ink)}
+  .topctl button.on{color:var(--accent)}
+
+  .sessline{margin:20px 0 0;font-size:17px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+  .sessline b{color:var(--ink);font-size:15px}
+  .slink{color:var(--ink2);position:relative;padding:1px 8px;white-space:nowrap;font-size:17px}
+  .slink:hover{color:var(--ink)}
+  .slink.on{color:var(--ink);font-weight:700}
+  .slink.on::before{
+    content:"";position:absolute;inset:-2px -3px;
+    border:2px solid var(--accent);
+    border-radius:225px 20px 255px 20px / 20px 255px 20px 225px;
+    filter:url(#squiggle);
+  }
+  .slink .st{font-size:12.5px;color:var(--ink3)}
+  .slink.on .st{color:var(--accent)}
+  .slink.on.live .st{color:var(--good)}
+  .slink.live{color:var(--ink);font-weight:700}
+  .slink.live .st{color:var(--good);font-weight:700}
+  .slink.live .st::before{content:"●";margin-right:3px;animation:beat 1.6s infinite}
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.25}}
+  @media (prefers-reduced-motion: reduce){ .slink.live .st::before{animation:none} }
+  .slink.fresh{color:var(--ink2)}
+  .slink.old{opacity:.5}
+  .slink.more{color:var(--accent);text-decoration:underline wavy 1.5px;text-underline-offset:4px}
+  .empty{color:var(--ink3);font-size:16px}
+
+  .agents{margin:16px 0 0;font-size:17.5px}
+  .agents .al{white-space:normal}
+  .agents .nw{white-space:nowrap}
+  .agents .agl{display:block;width:100%;text-align:left;padding:2px 8px;position:relative;
+    border-radius:8px;line-height:1.5}
+  .agents .agl:hover{background:color-mix(in srgb, var(--ink) 5%, transparent)}
+  .agents .agl.off{opacity:.42}
+  .agents .agl.on::before{content:"";position:absolute;inset:-1px -2px;
+    border:2.2px solid var(--accent);
+    border-radius:225px 20px 255px 20px / 20px 255px 20px 225px;filter:url(#squiggle)}
+  .agents .aghint{font-size:13.5px;color:var(--ink3);padding:2px 8px}
+  .agents .fold{color:var(--ink3);font-size:14.5px;padding:1px 8px;border-radius:8px;
+    text-decoration:underline wavy 1.3px;text-underline-offset:4px}
+  .agents .fold:hover{color:var(--ink);background:color-mix(in srgb, var(--ink) 5%, transparent)}
+  .agents .brief{display:block;font-size:14px;color:var(--ink3);padding:0 8px 2px 34px;line-height:1.4}
+  .agents .brief.main{padding-left:22px}
+  .agents .brief .q{color:var(--ink2)}
+  .agents .brief .run{color:var(--good);font-weight:700}
+  .agents .brief .dur{color:var(--ink2);font-variant-numeric:tabular-nums}
+  .openable{cursor:pointer}
+  .openable:hover .fn, .openable:hover{text-decoration-color:var(--accent)}
+  .mc.openable:hover{outline:2.5px solid var(--accent);outline-offset:2px}
+  #tm.openable{cursor:pointer}
+  .nofiles{font-size:15px;color:var(--ink3);margin:6px 0 0}
+  .nofiles b{color:var(--ink2)}
+  .agents .dot{color:var(--accent);font-weight:700}
+  .agents .sub{color:var(--ink3)}
+  /* model tiers: Fable on top, then Opus, Sonnet, Haiku */
+  .mdl{font-size:15px;color:var(--ink3);white-space:nowrap}
+  .mdl .tier{margin-right:3px}
+  .mdl.m-fable{
+    font-weight:700;letter-spacing:.02em;
+    background:linear-gradient(100deg, var(--gold3) 0%, var(--gold1) 28%,
+      var(--gold2) 46%, var(--gold1) 64%, var(--gold3) 100%);
+    background-size:280% 100%;
+    -webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;color:transparent;
+    animation:shimmer 4.5s ease-in-out infinite;
+  }
+  .mdl.m-fable .tier{-webkit-text-fill-color:var(--gold1);color:var(--gold1);
+    text-shadow:0 0 9px color-mix(in srgb, var(--gold2) 50%, transparent)}
+  @keyframes shimmer{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+  .mdl.m-opus{color:var(--accent);font-weight:700;
+    text-decoration:underline wavy 1.6px;text-underline-offset:4px}
+  .mdl.m-sonnet{color:var(--ink2);font-weight:600;
+    text-decoration:underline dotted 1.4px;text-underline-offset:4px}
+  .mdl.m-haiku{color:var(--ink3);font-size:14px;font-style:italic}
+  @media (prefers-reduced-motion: reduce){ .mdl.m-fable{animation:none} }
+  .agents .tk{color:var(--ink2);font-size:15px;font-variant-numeric:tabular-nums}
+
+  .statline{margin:8px 0 0;color:var(--ink2);font-size:17px;font-variant-numeric:tabular-nums}
+  .statline b{color:var(--ink)}
+  .statline .alert{color:var(--bad);font-weight:700}
+  .costline{font-size:15px;margin-top:3px;color:var(--ink3)}
+  .costline .hint2{color:var(--ink3);font-size:13.5px}
+  .frow .mk .er{color:var(--bad);font-weight:700}
+  .mc.err{box-shadow:inset 0 0 0 2px var(--bad)}
+
+  /* section headers: tiny, and foldable */
+  section h2{font-size:20px;margin:0 0 2px;cursor:pointer;user-select:none;display:inline-block}
+  section h2::before{content:"▾ ";color:var(--ink3);font-size:15px}
+  section.folded h2::before{content:"▸ "}
+  /* !important: id-based rules like #fogMap{display:flex} outrank this selector */
+  section.folded > *:not(h2){display:none !important}
+  section.folded h2{margin-bottom:0;opacity:.72}
+  section h2:hover{color:var(--accent)}
+  .hint{font-size:14px;color:var(--ink3);margin:0 0 12px}
+  .hint u{text-decoration:underline wavy 2px;text-underline-offset:3px}
+  .hint .ur{color:var(--op-read)} .hint .ug{color:var(--op-grep)}
+  .hint .ue{color:var(--op-edit)} .hint .ub{color:var(--op-bash)}
+  .hint b{color:var(--ink)}
+  .rootnote{font-size:14px;color:var(--ink3);margin:-8px 0 10px}
+  .rootnote b{color:var(--ink2);font-weight:700}
+
+  /* fog map */
+  #fogMap{display:flex;flex-direction:column;gap:6px}
+  .fgrow{display:flex;align-items:flex-start;gap:10px}
+  .fgrow .ilab{flex:none;width:196px;font-size:14.5px;font-weight:700;color:var(--ink2);padding-top:2px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fgcells{display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0}
+  .band{font-size:13px;color:var(--ink3);border:1.7px dashed var(--ink3);opacity:.55;
+    border-radius:10px 14px 11px 15px / 14px 11px 15px 10px;padding:1px 9px;white-space:nowrap;flex:none}
+  .band.wide{width:100%;text-align:center;padding:2px 0}
+  .mc{width:22px;height:22px;border:1.7px solid var(--ink3);position:relative;flex:none;
+    border-radius:6px 9px 7px 10px / 9px 7px 10px 6px}
+  .mc.un{border-style:dashed;opacity:.4}
+  .mc.now{outline:3px solid var(--accent);outline-offset:3px;animation:nowPulse 1.1s ease-in-out infinite}
+  @keyframes nowPulse{0%,100%{outline-color:var(--accent);outline-offset:3px}
+    50%{outline-color:color-mix(in srgb, var(--accent) 30%, transparent);outline-offset:6px}}
+  .tmnow{position:absolute;pointer-events:none;border:3px solid var(--accent);
+    border-radius:8px 12px 9px 13px / 12px 9px 13px 8px;
+    animation:nowRing 1.1s ease-in-out infinite;z-index:3}
+  @keyframes nowRing{0%,100%{opacity:1}50%{opacity:.4}}
+  @media (prefers-reduced-motion: reduce){ .mc.now{animation:none} .tmnow{animation:none} }
+  .mc .em{position:absolute;font-size:11px;right:-3px;top:-6px;color:var(--op-edit)}
+  @media (max-width:640px){ .fgrow .ilab{width:124px;font-size:12.5px} .mc{width:19px;height:19px} }
+
+  /* treemap */
+  .tmwrap{position:relative}
+  #tm{width:100%;height:320px;display:block}
+  .tmtip{position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;
+    background:var(--paper);border:2.5px solid var(--ink2);
+    border-radius:12px 16px 13px 17px / 16px 13px 17px 12px;
+    padding:8px 13px 9px;font-size:15px;max-width:330px;z-index:5;
+    box-shadow:2px 3px 0 color-mix(in srgb, var(--ink) 12%, transparent)}
+  .tmtip.show{opacity:1}
+  .tmtip b{display:block;word-break:break-all;font-size:16px;line-height:1.3;margin-bottom:4px}
+  .tmtip .tl{display:grid;grid-template-columns:auto auto;gap:0 14px;
+    font-size:14.5px;color:var(--ink2);line-height:1.45}
+  .tmtip .tl i{font-style:normal;color:var(--ink);font-weight:700;text-align:right;
+    font-variant-numeric:tabular-nums}
+  .tmtip .nt{margin-top:4px;font-size:13.5px;color:var(--ink3);word-break:break-all}
+  .tmtip .fl{margin-top:5px;font-size:14px;font-weight:700;color:var(--warn)}
+  .tmtip .fl.bad{color:var(--bad)}
+  .dtip{position:fixed;width:max-content;max-width:min(340px, 92vw);white-space:normal}
+  /* ask before opening: a mis-click shouldn't launch an editor */
+  .askbox{position:fixed;z-index:20;display:none;max-width:min(360px, 92vw);
+    background:var(--paper);border:2.5px solid var(--ink2);
+    border-radius:12px 16px 13px 17px / 16px 13px 17px 12px;
+    padding:10px 14px 11px;box-shadow:3px 4px 0 color-mix(in srgb, var(--ink) 14%, transparent)}
+  .askbox.show{display:block}
+  .askbox .what{font-size:15px;word-break:break-all;margin-bottom:2px}
+  .askbox .where{font-size:13.5px;color:var(--ink3);margin-bottom:8px}
+  .askbox .btns{display:flex;gap:14px;align-items:center}
+  .askbox button{font-size:15px;padding:2px 10px;border-radius:8px}
+  .askbox .yes{color:var(--accent);font-weight:700;
+    text-decoration:underline wavy 1.8px;text-underline-offset:4px}
+  .askbox .no{color:var(--ink3)}
+  .askbox button:hover{background:color-mix(in srgb, var(--ink) 6%, transparent)}
+
+  /* crayon-highlighted numbers */
+  .statline b, #cov, .agents .tk b, .frow .val b{
+    font-size:1.28em;font-weight:700;color:var(--ink);padding:0 3px;
+    background:linear-gradient(to top, transparent 10%,
+      color-mix(in srgb, var(--accent) 26%, transparent) 10% 48%, transparent 48%);
+    border-radius:5px;
+  }
+  .statline .alert b{color:var(--bad);
+    background:linear-gradient(to top, transparent 10%,
+      color-mix(in srgb, var(--bad) 24%, transparent) 10% 48%, transparent 48%)}
+
+  /* temporal strips */
+  .topctl .ranges{display:flex;gap:2px;align-items:baseline}
+  .topctl .ranges button{font-size:16px}
+  .ranges button{font-size:14px;color:var(--ink3);padding:0 6px;border-radius:7px}
+  .ranges button:hover{color:var(--ink2)}
+  .ranges button.on{color:var(--accent);font-weight:700;
+    text-decoration:underline wavy 1.6px;text-underline-offset:4px}
+  .ruler{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    color:var(--ink3);font-size:13.5px;margin:0 0 6px;padding-left:210px}
+  .ruler .mid{flex:1;height:2px;background:var(--ink3);opacity:.4;border-radius:99px;filter:url(#squiggle)}
+  @media (max-width:640px){ .ruler{padding-left:0} }
+  .drow{margin:13px 0 2px;color:var(--ink2);font-size:16px}
+  .drow u{text-decoration:underline wavy 2px;text-underline-offset:4px;text-decoration-color:var(--ink3)}
+  .drow.waste u{text-decoration-color:var(--warn)}
+  .drow .dh{color:var(--ink3);font-size:14px}
+  .frow{display:grid;grid-template-columns:210px minmax(0,1fr) 86px;gap:10px;align-items:center;padding:1.5px 0}
+  .frow .nm{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:16px}
+  .frow .opdot{font-size:13px;flex:none;transform:translateY(-1px)}
+  .frow .fn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .frow .mk{flex:none;font-size:13.5px}
+  .frow .mk .ed{color:var(--op-edit)}
+  .frow .mk .rr{color:var(--bad);font-weight:700}
+  .frow .mk .rw{color:var(--warn);font-weight:700}
+  .frow canvas{width:100%;height:18px;display:block}
+  .frow .val{text-align:right;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink2);white-space:nowrap}
+  .frow .val b{color:var(--ink);font-size:16px}
+  .frow .val .dl{color:var(--accent);font-weight:700;margin-left:5px}
+  .lines{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .lines .pl{color:var(--good);font-weight:700}
+  .lines .mn{color:var(--bad);font-weight:700;margin-left:4px}
+  .frow.gone .fn{text-decoration:line-through;text-decoration-thickness:2px;color:var(--ink3)}
+  .mc.gone{border-style:dotted;border-color:var(--bad)}
+  .mc.gone::after{content:"✕";position:absolute;inset:0;display:grid;place-items:center;
+    color:var(--bad);font-size:13px;font-weight:700}
+  .frow:hover{background:color-mix(in srgb, var(--ink) 5%, transparent);border-radius:8px}
+  @media (max-width:640px){ .frow{grid-template-columns:124px minmax(0,1fr) 62px} .frow .nm{font-size:13.5px} }
+  .quiet{color:var(--ink3);font-size:14px;margin-top:8px}
+
+  .ticker{margin:22px 0 0;font-size:15px;color:var(--ink2);font-variant-numeric:tabular-nums;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ticker .op{font-weight:700}
+  .ticker.blink{animation:tk .4s ease}
+  @keyframes tk{from{opacity:.2}to{opacity:1}}
+  @media (prefers-reduced-motion: reduce){ .ticker.blink{animation:none} }
+
+  .notes{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+  .note{font-size:16px;display:flex;gap:9px;align-items:baseline}
+  .note .ic{font-weight:800;flex:none;transform:rotate(-4deg)}
+  .note.good .ic{color:var(--good)} .note.warn .ic{color:var(--warn)} .note.bad .ic{color:var(--bad)}
+  .note .why{color:var(--ink2);font-size:14.5px}
+  .note u{text-decoration:underline wavy 2px;text-underline-offset:3px}
+  .note.warn u{text-decoration-color:var(--warn)} .note.bad u{text-decoration-color:var(--bad)}
+
+  footer{margin-top:30px;color:var(--ink3);font-size:13.5px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="squiggle">
+    <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="7" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="2.6"/>
+  </filter>
+  <filter id="squig0"><feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="2" seed="3" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.4"/></filter>
+  <filter id="squig1"><feTurbulence type="fractalNoise" baseFrequency="0.07" numOctaves="2" seed="17" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.8"/></filter>
+  <filter id="squig2"><feTurbulence type="fractalNoise" baseFrequency="0.11" numOctaves="2" seed="29" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.2"/></filter>
+  <filter id="squig3"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="2" seed="41" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="3"/></filter>
+</svg>
+
+<div class="sheet">
+  <header>
+    <div>
+      <h1><span class="spark">✳</span> claude-<span class="lt">sketch</span></h1>
+      <p class="tag" data-i18n="tag"></p>
+    </div>
+    <div class="topctl">
+      <button id="btnPause" type="button" aria-pressed="false"></button>
+      <span id="langs" class="ranges" role="group" aria-label="language"></span>
+    </div>
+  </header>
+
+  <div class="sessline">
+    <span data-i18n-html="watching"></span><b class="mono" id="projPath">…</b>
+    <span id="sessLinks"></span>
+  </div>
+
+  <div class="agents" id="agents"></div>
+  <p class="statline" id="statline"></p>
+  <p class="statline costline" id="costline"></p>
+
+  <div class="hline" role="separator"></div>
+
+  <section data-key="fog">
+    <h2 data-i18n="fogTitle"></h2>
+    <p class="hint"><span data-i18n-html="fogHint"></span> <b id="cov">–</b></p>
+    <p class="rootnote" id="rootNote" hidden></p>
+    <div id="fogMap"></div>
+    <p class="nofiles" id="noFiles" hidden></p>
+  </section>
+
+  <div class="hline" role="separator"></div>
+
+  <section data-key="tm">
+    <h2 data-i18n="tmTitle"></h2>
+    <p class="hint" data-i18n-html="tmHint"></p>
+    <div class="tmwrap"><canvas id="tm"></canvas><div class="tmnow" id="tmNow" hidden></div></div>
+  </section>
+
+  <div class="hline" role="separator"></div>
+
+  <section data-key="heat">
+    <h2 data-i18n="heatTitle"></h2>
+    <p class="hint"><span id="heatRange" class="ranges"></span> <span data-i18n-html="heatHint"></span></p>
+    <div class="ruler"><span id="rulerL"></span><span class="mid"></span><span data-i18n="rulerR"></span></div>
+    <div id="rows"></div>
+    <p class="quiet" id="quiet"></p>
+  </section>
+
+  <p class="ticker" id="ticker"></p>
+  <section class="notes" id="notes"></section>
+
+  <footer data-i18n="footer"></footer>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ══ i18n: add a language = add one object ══ */
+const I18N = {
+  en: {
+    _name: 'English', _short: 'EN',
+    tag: 'live heat-sheet of what Claude Code is touching · local only',
+    watching: 'watching',
+    live: '· live', done: '· done',
+    pause: 'pause', resume: 'resume',
+    agentStats: '· <b>{count}</b> calls · in <b>{tin}</b> / out <b>{tout}</b>',
+    statline: '<b>{ops}</b> tool calls · <b>{files}</b> files · re-read {rr}{err}',
+    costline: 'fresh in <b>{fresh}</b> · cache <b>{cache}</b> <span class="hint2">({hit}% reused)</span> · out <b>{tout}</b>{cost}',
+    costEst: ' · ≈<b>{v}</b> at API rates', costUnknown: ' · rate unset for {m}',
+    costTip:'API price equivalent', costTipNote:'Measured from message.usage × the rate table (~/.claude-sketch.pricing.json). Subscription plans are not billed per token — read this as how much work was done, not a bill.',
+    errChip: ' · <span class="alert"><b>{n}</b> failed</span>',
+    lblFailed:'failed', nErrT:'<u>{f}</u> failed {n}×', nErrW:'the same call keeps coming back an error',
+    nErrAgentT:'{n} calls failed in this session', nErrAgentW:'errors burn tokens and buy nothing',
+    openAsk:'Open in {e}?', openYes:'open', openNo:'cancel', openDone:'opened {f}',
+    fogTitle: 'footprints',
+    fogHint: '■ stepped on · ◌ never opened · ⋯n⋯ folded away ·',
+    tmTitle: 'attention share',
+    tmHint: 'area = hits · label = touched/total',
+    heatTitle: 'file heat',
+    heatHint: '<u class="ur">read</u> <u class="ug">search</u> <u class="ue">edit</u> <u class="ub">run</u> · ✎ edited · ×n re-reads',
+    rulerR: 'now →', rangeAll:'all', spanStart:'← {a}', spanNone:'← session start',
+    dirHits: '· {n} hits',
+    quietLine: '… +{n} quiet files ({h} hits) — {names}',
+    quietBandTitle:'untouched folders',
+    moreSess:'+{n} more', lessSess:'show less', earlierTasks:'+{n} earlier tasks',
+    agoM:'{n}m ago', agoH:'{n}h ago', agoD:'{n}d ago',
+    liveNow:'live', doneAt:'done · {a}',
+    foldTasks:'▸ {n} {s} hidden', showTasks:'▾ {n} {s}', taskWord:'task', taskWords:'tasks',
+    taskRun:'running', taskDone:'done in {d}', taskSpawn:'started {a}',
+    mainRun:'working', mainIdle:'idle', lastDo:'last {op} {f}', spanFor:'{d} of work',
+    secFold:'click to fold',
+    openTip:'click to open', openFail:'could not open — {e}',
+    noFilesYet:'<b>{n} calls, no files touched.</b> Shell commands and task spawns don\'t point at a file, so nothing is mapped yet — the maps fill in on the first read/edit/search.',
+    lblModel:'model', lblCalls:'calls', lblIn:'tokens in', lblOut:'tokens out',
+    flagFilterOn:'click to show every agent', flagFilterOff:'click to show only this agent',
+    filterHint:'click an agent to see only its files', filterOn:'showing only {a} — click again to reset',
+    underRoot:'all paths inside <b>{p}</b>',
+    lblAdded:'lines +', lblRemoved:'lines −', flagGone:'✕ deleted', taskQuick:'done in under a second',
+    lblHits:'hits', lblRead:'read', lblSearch:'search', lblEdit:'edit',
+    lblTok:'tokens', lblAgents:'agents', lblFiles:'files', lblTouched:'touched',
+    lblStatus:'status', lblUnexplored:'unexplored', sUntouched:'never opened',
+    flagReread:'⚠ re-read {n}× — likely already in context',
+    flagJunk:'⚠ dependency / cache path',
+    quietBand: '⋯⋯ {n} quiet files · {m} folder(s) ⋯⋯',
+    coverage: '{a} / {b} ({p}%)',
+    noActivity: 'no activity yet',
+    nRereadT: '<u>{f}</u> read {n}× — probably already in context',
+    nRereadW: 'likely duplicated context',
+    nJunkT: 'poking dependency/cache paths {n}×',
+    nJunkW: 'narrowing the prompt scope would save tokens',
+    nDupT: '{n} files explored by 2+ agents',
+    nDupW: 'main and subagents may be overlapping',
+    nClaudeT: 'read CLAUDE.md first', nClaudeW: 'project rules loaded before work',
+    nLoopT: 'edit → run loop detected', nLoopW: 'healthy rhythm',
+    footer: 'claude-sketch · reads ~/.claude/projects locally · nothing leaves this machine',
+    noSessions: 'no sessions for this folder yet — run Claude Code here first',
+    connecting: 'connecting…',
+  },
+  ko: {
+    _name: '한국어', _short: '한국어',
+    tag: 'Claude Code가 지금 만지는 파일의 실시간 관측 시트 · 완전 로컬',
+    watching: '관찰 중',
+    live: '· 진행 중', done: '· 완료',
+    pause: '일시정지', resume: '재개',
+    agentStats: '· <b>{count}</b>회 · 입력 <b>{tin}</b> / 출력 <b>{tout}</b>',
+    statline: '도구 호출 <b>{ops}</b> · 파일 <b>{files}</b> · 재읽기율 {rr}{err}',
+    costline: '새 입력 <b>{fresh}</b> · 캐시 <b>{cache}</b> <span class="hint2">({hit}% 재사용)</span> · 출력 <b>{tout}</b>{cost}',
+    costEst: ' · API 요금 환산 약 <b>{v}</b>', costUnknown: ' · {m} 단가 미설정',
+    costTip:'API 요금으로 환산하면', costTipNote:'message.usage 실측값 × 단가표(~/.claude-sketch.pricing.json) 계산입니다. 구독 요금제는 토큰당 과금이 아니므로, 청구액이 아니라 작업량의 크기로 읽으세요.',
+    errChip: ' · <span class="alert"><b>{n}</b>회 실패</span>',
+    lblFailed:'실패', nErrT:'<u>{f}</u> {n}회 실패', nErrW:'같은 호출이 계속 에러로 돌아옵니다',
+    nErrAgentT:'이 세션에서 {n}회 호출 실패', nErrAgentW:'실패는 토큰만 쓰고 얻는 게 없습니다',
+    openAsk:'{e}(으)로 열까요?', openYes:'열기', openNo:'취소', openDone:'{f} 열었습니다',
+    fogTitle: '발자국',
+    fogHint: '■ 밟은 파일 · ◌ 안 열어본 파일 · ⋯n⋯ 접힘 ·',
+    tmTitle: '주목 점유율',
+    tmHint: '면적 = 히트 · 라벨 = 접촉/전체',
+    heatTitle: '파일 히트',
+    heatHint: '<u class="ur">읽기</u> <u class="ug">검색</u> <u class="ue">수정</u> <u class="ub">실행</u> · ✎ 수정됨 · ×n 재읽기',
+    rulerR: '지금 →', rangeAll:'전체', spanStart:'← {a}', spanNone:'← 세션 시작',
+    dirHits: '· {n}회',
+    quietLine: '… 조용한 파일 {n}개 ({h}회) — {names}',
+    quietBandTitle:'미접촉 폴더',
+    moreSess:'+{n}개 더', lessSess:'접기', earlierTasks:'이전 task {n}개 더',
+    agoM:'{n}분 전', agoH:'{n}시간 전', agoD:'{n}일 전',
+    liveNow:'진행 중', doneAt:'완료 · {a}',
+    foldTasks:'▸ task {n}개 접힘{s}', showTasks:'▾ task {n}개{s}', taskWord:'', taskWords:'',
+    taskRun:'진행 중', taskDone:'{d} 만에 완료', taskSpawn:'{a} 시작',
+    mainRun:'작업 중', mainIdle:'대기', lastDo:'마지막 {op} {f}', spanFor:'작업 {d}',
+    secFold:'클릭하면 접기',
+    openTip:'클릭하면 열기', openFail:'열 수 없음 — {e}',
+    noFilesYet:'<b>호출 {n}회, 접촉 파일 0개.</b> 셸 명령과 task 실행은 파일을 가리키지 않아 지도에 표시할 대상이 없습니다 — 첫 읽기·수정·검색이 일어나면 채워집니다.',
+    lblModel:'모델', lblCalls:'호출', lblIn:'입력 토큰', lblOut:'출력 토큰',
+    flagFilterOn:'클릭하면 전체 에이전트로', flagFilterOff:'클릭하면 이 에이전트만',
+    filterHint:'에이전트를 클릭하면 그 에이전트가 만진 파일만 보입니다', filterOn:'{a} 만 표시 중 — 다시 클릭하면 해제',
+    underRoot:'모든 경로는 <b>{p}</b> 아래',
+    lblAdded:'추가 줄', lblRemoved:'삭제 줄', flagGone:'✕ 삭제됨', taskQuick:'1초 내 완료',
+    lblHits:'히트', lblRead:'읽기', lblSearch:'검색', lblEdit:'수정',
+    lblTok:'토큰', lblAgents:'에이전트', lblFiles:'파일', lblTouched:'접촉',
+    lblStatus:'상태', lblUnexplored:'미탐색', sUntouched:'열어본 적 없음',
+    flagReread:'⚠ {n}회 재읽기 — 이미 컨텍스트에 있을 가능성',
+    flagJunk:'⚠ 의존성 / 캐시 경로',
+    quietBand: '⋯⋯ 조용한 파일 {n}개 · 폴더 {m}개 ⋯⋯',
+    coverage: '{a} / {b} ({p}%)',
+    noActivity: '아직 활동 없음',
+    nRereadT: '<u>{f}</u> {n}회 재읽기 — 이미 컨텍스트에 있을 가능성',
+    nRereadW: '중복 컨텍스트 소비 추정',
+    nJunkT: '의존성·캐시 경로 {n}회 탐색',
+    nJunkW: '프롬프트 범위를 좁히면 절약됩니다',
+    nDupT: '파일 {n}개를 에이전트 2개 이상이 중복 탐색',
+    nDupW: '메인·서브 작업이 겹칠 수 있음',
+    nClaudeT: 'CLAUDE.md 먼저 읽음', nClaudeW: '작업 전 프로젝트 규칙 로드',
+    nLoopT: '수정 → 실행 루프 확인', nLoopW: '건강한 리듬',
+    footer: 'claude-sketch · ~/.claude/projects 로컬 읽기 전용 · 외부 전송 없음',
+    noSessions: '이 폴더의 세션이 아직 없습니다 — 여기서 Claude Code를 먼저 실행하세요',
+    connecting: '연결 중…',
+  },
+  ja: {
+    _name: '日本語', _short: '日本語',
+    tag: 'Claude Code が今どのファイルに触れているかの実況シート · 完全ローカル',
+    watching: '監視中',
+    live: '· 実行中', done: '· 完了',
+    pause: '一時停止', resume: '再開',
+    agentStats: '· <b>{count}</b> 回 · 入力 <b>{tin}</b> / 出力 <b>{tout}</b>',
+    statline: 'ツール呼び出し <b>{ops}</b> · ファイル <b>{files}</b> · 再読込率 {rr}{err}',
+    costline: '新規入力 <b>{fresh}</b> · キャッシュ <b>{cache}</b> <span class="hint2">({hit}% 再利用)</span> · 出力 <b>{tout}</b>{cost}',
+    costEst: ' · API 料金換算 約<b>{v}</b>', costUnknown: ' · {m} の単価が未設定',
+    costTip:'API 料金に換算すると', costTipNote:'message.usage の実測値 × 単価表（~/.claude-sketch.pricing.json）で計算しています。サブスクリプションはトークン課金ではないため、請求額ではなく作業量の目安として読んでください。',
+    errChip: ' · <span class="alert"><b>{n}</b> 件失敗</span>',
+    lblFailed:'失敗', nErrT:'<u>{f}</u> が {n} 回失敗', nErrW:'同じ呼び出しがエラーで返り続けています',
+    nErrAgentT:'このセッションで {n} 回の呼び出しが失敗', nErrAgentW:'失敗はトークンだけ消費して何も得られません',
+    openAsk:'{e} で開きますか？', openYes:'開く', openNo:'キャンセル', openDone:'{f} を開きました',
+    fogTitle: '足あと',
+    fogHint: '■ 踏んだファイル · ◌ 未オープン · ⋯n⋯ 折りたたみ ·',
+    tmTitle: '注目シェア',
+    tmHint: '面積 = ヒット数 · ラベル = 接触/全体',
+    heatTitle: 'ファイル熱量',
+    heatHint: '<u class="ur">読む</u> <u class="ug">検索</u> <u class="ue">編集</u> <u class="ub">実行</u> · ✎ 編集済み · ×n 再読込',
+    rulerR: '今 →', rangeAll:'全体', spanStart:'← {a}', spanNone:'← セッション開始',
+    dirHits: '· {n} 回',
+    quietLine: '… 静かなファイル {n} 件（{h} 回）— {names}',
+    quietBandTitle:'未接触フォルダ',
+    moreSess:'+{n} 件', lessSess:'たたむ', earlierTasks:'以前の task {n} 件',
+    agoM:'{n}分前', agoH:'{n}時間前', agoD:'{n}日前',
+    liveNow:'実行中', doneAt:'完了 · {a}',
+    foldTasks:'▸ task {n} 件を隠す{s}', showTasks:'▾ task {n} 件{s}', taskWord:'', taskWords:'',
+    taskRun:'実行中', taskDone:'{d} で完了', taskSpawn:'{a} に開始',
+    mainRun:'作業中', mainIdle:'待機', lastDo:'最後の {op} {f}', spanFor:'作業 {d}',
+    secFold:'クリックでたたむ',
+    openTip:'クリックで開く', openFail:'開けません — {e}',
+    noFilesYet:'<b>{n} 回の呼び出し、接触ファイル 0。</b> シェルコマンドと task 起動はファイルを指さないため、まだ地図に出るものがありません — 最初の読み取り・編集・検索で埋まります。',
+    lblModel:'モデル', lblCalls:'呼び出し', lblIn:'入力トークン', lblOut:'出力トークン',
+    flagFilterOn:'クリックで全エージェント表示', flagFilterOff:'クリックでこのエージェントのみ',
+    filterHint:'エージェントをクリックすると、そのファイルだけ表示されます', filterOn:'{a} のみ表示中 — もう一度クリックで解除',
+    underRoot:'すべてのパスは <b>{p}</b> の下',
+    lblAdded:'追加行', lblRemoved:'削除行', flagGone:'✕ 削除済み', taskQuick:'1秒以内に完了',
+    lblHits:'ヒット', lblRead:'読む', lblSearch:'検索', lblEdit:'編集',
+    lblTok:'トークン', lblAgents:'エージェント', lblFiles:'ファイル', lblTouched:'接触',
+    lblStatus:'状態', lblUnexplored:'未探索', sUntouched:'一度も開いていない',
+    flagReread:'⚠ {n} 回再読込 — すでに文脈にある可能性',
+    flagJunk:'⚠ 依存 / キャッシュのパス',
+    quietBand: '⋯⋯ 静かなファイル {n} 件 · フォルダ {m} 件 ⋯⋯',
+    coverage: '{a} / {b} ({p}%)',
+    noActivity: 'まだ動きがありません',
+    nRereadT: '<u>{f}</u> を {n} 回読み込み — すでに文脈にあるはず',
+    nRereadW: '文脈の重複消費とみられます',
+    nJunkT: '依存 / キャッシュのパスを {n} 回探索',
+    nJunkW: 'プロンプトで範囲を絞ればトークンを節約できます',
+    nDupT: '{n} 件のファイルを 2 つ以上のエージェントが重複探索',
+    nDupW: 'メインとサブの作業が重なっている可能性',
+    nClaudeT: 'CLAUDE.md を最初に読んだ', nClaudeW: '作業前にプロジェクト規約を読み込み済み',
+    nLoopT: '編集 → 実行のループを確認', nLoopW: '健全なリズム',
+    footer: 'claude-sketch · ~/.claude/projects をローカルで読むだけ · 外部には何も送りません',
+    noSessions: 'このフォルダのセッションはまだありません — まず Claude Code をここで実行してください',
+    connecting: '接続中…',
+  },
+  zh: {
+    _name: '中文', _short: '中文',
+    tag: 'Claude Code 正在触碰哪些文件的实时速写 · 完全本地',
+    watching: '监视中',
+    live: '· 进行中', done: '· 已完成',
+    pause: '暂停', resume: '继续',
+    agentStats: '· <b>{count}</b> 次 · 输入 <b>{tin}</b> / 输出 <b>{tout}</b>',
+    statline: '工具调用 <b>{ops}</b> · 文件 <b>{files}</b> · 重读率 {rr}{err}',
+    costline: '新输入 <b>{fresh}</b> · 缓存 <b>{cache}</b> <span class="hint2">({hit}% 复用)</span> · 输出 <b>{tout}</b>{cost}',
+    costEst: ' · 按 API 价约<b>{v}</b>', costUnknown: ' · {m} 未设置单价',
+    costTip:'折算成 API 价格', costTipNote:'按 message.usage 实测值 × 价目表（~/.claude-sketch.pricing.json）计算。订阅套餐并非按 token 计费，请把它读作工作量的大小，而不是账单。',
+    errChip: ' · <span class="alert"><b>{n}</b> 次失败</span>',
+    lblFailed:'失败', nErrT:'<u>{f}</u> 失败 {n} 次', nErrW:'同一个调用一直返回错误',
+    nErrAgentT:'本次会话中 {n} 次调用失败', nErrAgentW:'失败只烧 token，什么也换不回来',
+    openAsk:'用 {e} 打开？', openYes:'打开', openNo:'取消', openDone:'已打开 {f}',
+    fogTitle: '足迹',
+    fogHint: '■ 踩过的文件 · ◌ 从未打开 · ⋯n⋯ 已折叠 ·',
+    tmTitle: '注意力占比',
+    tmHint: '面积 = 命中次数 · 标签 = 接触/总数',
+    heatTitle: '文件热度',
+    heatHint: '<u class="ur">读取</u> <u class="ug">搜索</u> <u class="ue">编辑</u> <u class="ub">运行</u> · ✎ 已编辑 · ×n 重读',
+    rulerR: '现在 →', rangeAll:'全部', spanStart:'← {a}', spanNone:'← 会话开始',
+    dirHits: '· {n} 次',
+    quietLine: '… 另有 {n} 个安静文件（{h} 次）— {names}',
+    quietBandTitle:'未接触的文件夹',
+    moreSess:'+{n} 个', lessSess:'收起', earlierTasks:'更早的 task {n} 个',
+    agoM:'{n} 分钟前', agoH:'{n} 小时前', agoD:'{n} 天前',
+    liveNow:'进行中', doneAt:'已完成 · {a}',
+    foldTasks:'▸ 隐藏 {n} 个 task{s}', showTasks:'▾ {n} 个 task{s}', taskWord:'', taskWords:'',
+    taskRun:'运行中', taskDone:'{d} 完成', taskSpawn:'{a} 开始',
+    mainRun:'工作中', mainIdle:'空闲', lastDo:'最近 {op} {f}', spanFor:'工作 {d}',
+    secFold:'点击折叠',
+    openTip:'点击打开', openFail:'无法打开 — {e}',
+    noFilesYet:'<b>{n} 次调用，未接触任何文件。</b> Shell 命令和 task 启动并不指向文件，因此地图上暂时没有内容 — 第一次读取／编辑／搜索后就会填上。',
+    lblModel:'模型', lblCalls:'调用', lblIn:'输入 token', lblOut:'输出 token',
+    flagFilterOn:'点击显示全部智能体', flagFilterOff:'点击只看这个智能体',
+    filterHint:'点击某个智能体，只看它碰过的文件', filterOn:'仅显示 {a} — 再次点击可取消',
+    underRoot:'所有路径都在 <b>{p}</b> 之下',
+    lblAdded:'新增行', lblRemoved:'删除行', flagGone:'✕ 已删除', taskQuick:'1 秒内完成',
+    lblHits:'命中', lblRead:'读取', lblSearch:'搜索', lblEdit:'编辑',
+    lblTok:'token', lblAgents:'智能体', lblFiles:'文件', lblTouched:'接触',
+    lblStatus:'状态', lblUnexplored:'未探索', sUntouched:'从未打开',
+    flagReread:'⚠ 重读 {n} 次 — 很可能已在上下文里',
+    flagJunk:'⚠ 依赖 / 缓存路径',
+    quietBand: '⋯⋯ 安静文件 {n} 个 · 文件夹 {m} 个 ⋯⋯',
+    coverage: '{a} / {b} ({p}%)',
+    noActivity: '还没有活动',
+    nRereadT: '<u>{f}</u> 读取 {n} 次 — 多半已在上下文里',
+    nRereadW: '疑似重复消耗上下文',
+    nJunkT: '探索依赖／缓存路径 {n} 次',
+    nJunkW: '在提示里收窄范围可以省下这些 token',
+    nDupT: '{n} 个文件被 2 个以上智能体重复探索',
+    nDupW: '主智能体与子智能体的工作可能重叠',
+    nClaudeT: '先读了 CLAUDE.md', nClaudeW: '动手前已载入项目规则',
+    nLoopT: '发现 编辑 → 运行 的循环', nLoopW: '健康的节奏',
+    footer: 'claude-sketch · 仅在本地读取 ~/.claude/projects · 不向外发送任何内容',
+    noSessions: '该文件夹还没有会话 — 请先在这里运行 Claude Code',
+    connecting: '连接中…',
+  },
+};
+const LANGS = Object.keys(I18N);
+let LANG = (()=>{ try{ const s = localStorage.getItem('cs-lang'); if (s && I18N[s]) return s; }catch(e){}
+  return (navigator.language||'').toLowerCase().startsWith('ko') ? 'ko' : 'en'; })();
+function t(k, vars){
+  let s = (I18N[LANG] && I18N[LANG][k]) ?? I18N.en[k] ?? k;
+  if (vars) for (const kk in vars) s = s.split('{'+kk+'}').join(vars[kk]);
+  return s;
+}
+
+/* ══ palette ══ */
+const css = () => getComputedStyle(document.documentElement);
+let PAL = {};
+function readPal(){
+  const c = css();
+  PAL = {
+    heat: c.getPropertyValue('--heat').trim(),
+    read: c.getPropertyValue('--op-read').trim(),
+    grep: c.getPropertyValue('--op-grep').trim(),
+    edit: c.getPropertyValue('--op-edit').trim(),
+    bash: c.getPropertyValue('--op-bash').trim(),
+    del:  c.getPropertyValue('--bad').trim(),
+    good: c.getPropertyValue('--good').trim(),
+    warn: c.getPropertyValue('--warn').trim(),
+    ink:  c.getPropertyValue('--ink').trim(),
+    ink2: c.getPropertyValue('--ink2').trim(),
+    ink3: c.getPropertyValue('--ink3').trim(),
+    paper:c.getPropertyValue('--paper').trim(),
+  };
+}
+readPal();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>{ readPal(); if (S) renderAll(); });
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const OP_LABEL = {read:'READ', grep:'GREP', edit:'EDIT', bash:'RUN', task:'TASK', del:'DEL'};
+const opCol = k => ({read:PAL.read,grep:PAL.grep,edit:PAL.edit,bash:PAL.bash,task:PAL.heat,del:PAL.del})[k] || PAL.ink3;
+
+/* ══ helpers ══ */
+const $ = id => document.getElementById(id);
+const BUCKET = 10000, COLS = 30;
+function lineDelta(fs){
+  if (!fs.plus && !fs.minus) return '';
+  return (fs.plus ? `<span class="pl">+${fs.plus}</span>` : '')
+       + (fs.minus ? `<span class="mn">−${fs.minus}</span>` : '');
+}
+function rateFor(model){
+  if (!PRICING || !model) return null;
+  const key = Object.keys(PRICING.models).find(k => model.toLowerCase().includes(k));
+  return key ? PRICING.models[key] : null;
+}
+function costOf(a){                      // → {usd, known} for one agent
+  const r = rateFor(a.model);
+  if (!r) return {usd: 0, known: false};
+  const M = 1e6;
+  const usd = (a.fresh/M)*r.in
+            + (a.cw/M)*r.in*(PRICING.cacheWriteFactor ?? 1.25)
+            + (a.cr/M)*r.in*(PRICING.cacheReadFactor ?? 0.1)
+            + (a.tout/M)*r.out;
+  return {usd, known: true};
+}
+function fmtUsd(v){ return v >= 10 ? '$'+v.toFixed(0) : v >= 0.01 ? '$'+v.toFixed(2) : '<$0.01'; }
+function fmtTok(n){ return n>=1e6 ? (n/1e6).toFixed(1)+'M' : n>=1000 ? (n/1000).toFixed(1)+'k' : String(n); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function hash(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))|0; } return Math.abs(h); }
+function mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t2=Math.imul(a^a>>>15,1|a);
+  t2=t2+Math.imul(t2^t2>>>7,61|t2)^t2; return ((t2^t2>>>14)>>>0)/4294967296; }; }
+function dirOf(p){
+  if (p.startsWith('web: ') || p.startsWith('http')) return '(web)';
+  return p.includes('/') ? p.split('/').slice(0,-1).join('/') : '(root)';
+}
+function isWastePath(p){
+  return /(^|\/)(node_modules|\.deps|\.venv|venv|__pycache__|dist|build|\.cache|data\/cache)(\/|$)/.test(p);
+}
+function domOp(ops){ let bk=null,bv=-1; for(const k in ops){ if(ops[k]>bv){bv=ops[k];bk=k;} } return bk; }
+function shortModel(m){ return String(m||'').replace(/^claude-/,'').replace(/-\d{8}$/,''); }
+// claude-opus-4-8 → "Opus 4.8"; the family decides the badge's rank
+const TIERS = [
+  [/fable|mythos/i, 'm-fable',  '✦'],
+  [/opus/i,         'm-opus',   '◆'],
+  [/sonnet/i,       'm-sonnet', '◇'],
+  [/haiku/i,        'm-haiku',  ''],
+];
+function prettyModel(m){
+  const parts = shortModel(m).split('-');
+  if (!parts[0]) return '';
+  const name = parts[0][0].toUpperCase() + parts[0].slice(1);
+  const ver = parts.slice(1).filter(x=>/^\d+$/.test(x)).join('.');
+  return ver ? `${name} ${ver}` : name;
+}
+function modelBadge(m){
+  if (!m) return '';
+  const hit = TIERS.find(([re])=>re.test(m));
+  const cls = hit ? hit[1] : 'm-other', mark = hit ? hit[2] : '';
+  return `<span class="mdl ${cls}">${mark?`<span class="tier">${mark}</span>`:''}${esc(prettyModel(m))}</span>`;
+}
+function shortDir(d, keep){                 // '/a/b/c/d/' → '…/c/d'
+  if (d.startsWith('(')) return d;
+  const seg = d.split('/').filter(Boolean);
+  return seg.length > (keep||2) ? '…/' + seg.slice(-(keep||2)).join('/') : d;
+}
+/* every folder shares the same leading segments → show them once, strip from labels */
+let ROOT = '';
+function computeRoot(dirs){
+  const rel = dirs.filter(d => d && !d.startsWith('(') && !d.startsWith('/'));
+  if (rel.length < 2) return '';
+  let pre = rel[0].split('/');
+  for (const d of rel.slice(1)){
+    const seg = d.split('/');
+    let i = 0;
+    while (i < pre.length && i < seg.length && pre[i] === seg[i]) i++;
+    pre = pre.slice(0, i);
+    if (!pre.length) return '';
+  }
+  return pre.join('/');
+}
+function stripRoot(d){
+  if (!ROOT || d.startsWith('(')) return d;
+  if (d === ROOT) return './';
+  return d.startsWith(ROOT+'/') ? d.slice(ROOT.length+1) : d;
+}
+function dirLabel(d, keep){ return shortDir(stripRoot(d), keep); }
+
+/* ══ state ══ */
+let SESSIONS = [];
+let PRICING = null, EDITOR = 'system';
+let UNIVERSE = null;      // {tree:[[dir,[names]]...], total, set:Set(paths)}
+let S = null;             // current session state
+let ES = null;            // EventSource
+let running = true;
+let liveBuf = [];         // buffered events while paused
+let renderQueued = false;
+
+function newState(id){
+  return { id, ready:false,
+    files:new Map(),      // path -> {ops,total,tokens,agents,reads,firstIx,delta,deltaT,lastT,hb:{}}
+    agents:new Map(),     // name -> {count,tin,tout,model}
+    opCount:{read:0,grep:0,edit:0,bash:0,task:0,del:0},
+    opFiles:new Map(),    // tool_use id -> {file, agent} (matches results back to files)
+    now:null,             // {file, ts} — what is being touched right now
+    firstTs:0,            // first event — gives the session's working span
+    tasks:new Map(),      // tool_use id -> {desc, sub, start, end, agent}
+    all:[],               // raw op/res events — replayed when the agent filter changes
+    filter:null,          // null = every agent, else an agent name
+    n:0, lastEv:null };
+}
+function passes(ev){ return !S.filter || ev.agent === S.filter || ev.t === 'res'; }
+function rebuild(){        // recompute derived state for the current filter
+  S.files = new Map(); S.opFiles = new Map(); S.n = 0;
+  S.opCount = {read:0,grep:0,edit:0,bash:0,task:0,del:0};
+  for (const a of S.agents.values()) a.count = 0;
+  rowEls.clear();
+  for (const ev of S.all) applyEvent(ev, true, true);
+  renderAll();
+}
+function setFilter(name){
+  S.filter = (S.filter === name) ? null : name;
+  rebuild();
+}
+
+function agentOf(name){
+  let a = S.agents.get(name);
+  if (!a){ a = {count:0, tin:0, tout:0, fresh:0, cw:0, cr:0, errs:0, model:'', task:null,
+    firstTs:0, lastTs:0, lastOp:'', lastFile:''}; S.agents.set(name, a); }
+  return a;
+}
+function fmtDur(ms){
+  const s2 = Math.round(ms/1000);
+  if (s2 < 60) return s2+'s';
+  const m = Math.floor(s2/60);
+  return m < 60 ? `${m}m ${s2%60}s` : `${Math.floor(m/60)}h ${m%60}m`;
+}
+
+function applyEvent(ev, silent, replay){
+  if (ev.t === 'agent'){                       // subagent file appeared: pair it with its Task call
+    const a = agentOf(ev.name);
+    const paired = ev.toolUseId ? S.tasks.get(ev.toolUseId) : null;
+    if (paired){ paired.agent = ev.name; a.task = paired; if (!paired.desc) paired.desc = ev.description; }
+    else a.task = a.task || {desc: ev.description, sub: ev.agentType, start: 0, end: null, agent: ev.name};
+    return;
+  }
+  if (ev.t === 'model'){ agentOf(ev.agent).model = shortModel(ev.model); return; }
+  if (ev.t === 'usage'){
+    const a = agentOf(ev.agent);
+    a.tin = ev.tin; a.tout = ev.tout;
+    a.fresh = ev.fresh || 0; a.cw = ev.cw || 0; a.cr = ev.cr || 0;
+    return;
+  }
+  if (ev.t === 'title'){ const s = SESSIONS.find(x=>x.id===S.id); if (s){ s.title = ev.title; renderSessLinks(); } return; }
+  if (!replay && (ev.t === 'op' || ev.t === 'res')){
+    S.all.push(ev);
+    if (S.all.length > 60000) S.all.splice(0, 10000);
+  }
+  if (!passes(ev)) return;
+  if (ev.t === 'res'){
+    const tk = S.tasks.get(ev.id);             // a task's result = that subagent finishing
+    if (tk && !tk.end) tk.end = ev.ts || Date.now();
+    const m = S.opFiles.get(ev.id);
+    if (m){
+      const fs = S.files.get(m.file);
+      if (fs){
+        fs.tokens += Math.round(ev.len/4);
+        if (ev.err){ fs.errs++; fs.lastErr = ev.ts; }
+      }
+      if (ev.err) agentOf(m.agent).errs++;
+      S.opFiles.delete(ev.id);
+    } else if (ev.err && S.lastEv) {
+      agentOf(S.lastEv.agent).errs++;          // bash/task failures have no file
+    }
+    return;
+  }
+  if (ev.t !== 'op') return;
+  const a = agentOf(ev.agent); a.count++;
+  a.lastTs = ev.ts; a.lastOp = ev.op; a.lastFile = ev.file;
+  if (!a.firstTs || ev.ts < a.firstTs) a.firstTs = ev.ts;
+  if (!S.firstTs || ev.ts < S.firstTs) S.firstTs = ev.ts;
+  if (!replay) S.lastAny = ev;
+  if (ev.op === 'task' && ev.id && !S.tasks.has(ev.id))
+    S.tasks.set(ev.id, {desc: ev.desc || ev.file, sub: ev.sub, start: ev.ts, end: null, agent: null});
+  S.opCount[ev.op] = (S.opCount[ev.op]||0)+1;
+  S.lastEv = ev;
+  if (ev.op === 'bash' || ev.op === 'task') return;
+  const fs = S.files.get(ev.file) || {ops:{read:0,grep:0,edit:0,del:0}, total:0, tokens:0,
+    agents:new Set(), reads:0, firstIx:S.n++, delta:0, deltaT:0, hb:{}, plus:0, minus:0,
+    gone:false, errs:0, lastErr:0};
+  fs.ops[ev.op] = (fs.ops[ev.op]||0)+1; fs.total++;
+  if (ev.plus) fs.plus += ev.plus;
+  if (ev.minus) fs.minus += ev.minus;
+  if (ev.op === 'del') fs.gone = true;
+  fs.agents.add(ev.agent); fs.lastT = ev.ts;
+  if (ev.op==='read') fs.reads++;
+  if (!silent){ fs.delta++; fs.deltaT = Date.now(); S.now = {file: ev.file, ts: Date.now()}; }
+  fs.hb[Math.floor(ev.ts/BUCKET)] = (fs.hb[Math.floor(ev.ts/BUCKET)]||0)+1;
+  S.files.set(ev.file, fs);
+  S.opFiles.set(ev.id, {file: ev.file, agent: ev.agent});
+  if (S.opFiles.size > 5000) S.opFiles.delete(S.opFiles.keys().next().value);
+}
+
+const askBox = document.createElement('div');
+askBox.className = 'askbox';
+askBox.innerHTML = `<div class="what"></div><div class="where"></div>
+  <div class="btns"><button type="button" class="yes"></button><button type="button" class="no"></button></div>`;
+document.body.appendChild(askBox);
+const askWhat = askBox.querySelector('.what'), askWhere = askBox.querySelector('.where');
+const askYes = askBox.querySelector('.yes'), askNo = askBox.querySelector('.no');
+let askTarget = null;
+function hideAsk(){ askBox.classList.remove('show'); askTarget = null; }
+askNo.addEventListener('click', hideAsk);
+askYes.addEventListener('click', ()=>{ const p = askTarget; hideAsk(); if (p) doOpen(p); });
+addEventListener('keydown', e=>{
+  if (!askTarget) return;
+  if (e.key === 'Escape') hideAsk();
+  if (e.key === 'Enter'){ const p = askTarget; hideAsk(); doOpen(p); }
+});
+addEventListener('mousedown', e=>{ if (askTarget && !askBox.contains(e.target)) hideAsk(); }, true);
+
+// A click asks first — mis-clicks on a dense map shouldn't launch anything.
+function openTarget(p, ev){
+  askTarget = p;
+  askWhat.textContent = p;
+  askWhere.textContent = t('openAsk', {e: EDITOR});
+  askYes.textContent = t('openYes');
+  askNo.textContent = t('openNo');
+  askBox.classList.add('show');
+  const x = ev ? ev.clientX : innerWidth/2, y = ev ? ev.clientY : innerHeight/2;
+  const w = askBox.offsetWidth, h = askBox.offsetHeight;
+  askBox.style.left = Math.max(6, Math.min(innerWidth-w-8, x-w/2))+'px';
+  askBox.style.top = (y+h+16 > innerHeight ? Math.max(6, y-h-12) : y+12)+'px';
+  askYes.focus();
+}
+function doOpen(p){
+  fetch('/api/open', {method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({path: p})})
+    .then(r=>r.json())
+    .then(r=>{ flash(r.ok ? t('openDone', {f: p.split('/').pop()}) : t('openFail', {e: r.error||'?'})); })
+    .catch(e=> flash(t('openFail', {e: String(e)})));
+}
+function flash(msg){
+  const el = $('ticker');
+  el.textContent = msg;
+  el.classList.remove('blink'); void el.offsetWidth; el.classList.add('blink');
+}
+
+/* ══ data loading ══ */
+async function loadMeta(){
+  try{
+    const m = await (await fetch('/api/meta')).json();
+    $('projPath').textContent = m.project;
+    PRICING = m.pricing; EDITOR = m.editor || 'system';
+  }catch(e){ $('projPath').textContent = '?'; }
+}
+async function loadUniverse(){
+  try{
+    const u = await (await fetch('/api/universe')).json();
+    const dirs = new Map();
+    for (const p of u.files){
+      const d = dirOf(p);
+      if (!dirs.has(d)) dirs.set(d, []);
+      dirs.get(d).push(p.split('/').pop());
+    }
+    UNIVERSE = {
+      tree: [...dirs.entries()].sort((a,b)=>a[0].localeCompare(b[0])),
+      total: u.files.length,
+      set: new Set(u.files),
+    };
+  }catch(e){ UNIVERSE = {tree:[], total:0, set:new Set()}; }
+}
+async function loadSessions(){
+  try{
+    const r = await (await fetch('/api/sessions')).json();
+    SESSIONS = r.sessions || [];
+  }catch(e){ SESSIONS = []; }
+  renderSessLinks();
+  if (!S && SESSIONS.length) selectSession((SESSIONS.find(s=>s.active) || SESSIONS[0]).id);
+  if (!SESSIONS.length) $('sessLinks').innerHTML = `<span class="empty">${t('noSessions')}</span>`;
+}
+
+function selectSession(id){
+  if (S && S.id === id) return;
+  if (ES) ES.close();
+  S = newState(id);
+  liveBuf = [];
+  rowEls.clear();
+  $('ticker').textContent = t('connecting');
+  renderSessLinks();
+  ES = new EventSource('/events?session=' + encodeURIComponent(id));
+  ES.onmessage = (m) => {
+    let d; try{ d = JSON.parse(m.data); }catch(e){ return; }
+    if (d.t === 'backlog'){
+      const silent = !S.ready;
+      for (const ev of d.events){
+        if (!silent && !running){ liveBuf.push(ev); continue; }
+        applyEvent(ev, silent);
+      }
+      if (S.ready && running){ scheduleRender(); if (S.lastEv) renderTicker(S.lastEv); }
+    } else if (d.t === 'ready'){
+      S.ready = true;
+      if (d.title){ const s = SESSIONS.find(x=>x.id===S.id); if (s && !s.title) s.title = d.title; }
+      renderAll();
+      if (S.lastEv) renderTicker(S.lastEv);
+    }
+  };
+}
+
+function scheduleRender(){
+  if (renderQueued) return;
+  renderQueued = true;
+  setTimeout(()=>{ renderQueued = false; if (S && S.ready) renderAll(); }, 250);
+}
+
+/* ══ fog map ══ */
+function heatScore(fs, nowIx){
+  let sc = 0;
+  for (let i=0;i<COLS;i++){ const n = fs.hb[nowIx-i]; if (n) sc += n*Math.pow(0.9, i); }
+  return sc + fs.total*0.04;
+}
+/* structured doodle tooltip: title + label/value rows + optional note & flag */
+function tipBox(title, rows, opt){
+  opt = opt || {};
+  return `<b>${esc(title)}</b>`
+    + (rows && rows.length ? `<div class="tl">${rows.map(([k,v])=>
+        `<span>${k}</span><i>${esc(v)}</i>`).join('')}</div>` : '')
+    + (opt.note ? `<div class="nt">${esc(opt.note)}</div>` : '')
+    + (opt.flag ? `<div class="fl${opt.bad?' bad':''}">${opt.flag}</div>` : '');
+}
+function fileTip(p, fs, openable){
+  const rows = [[t('lblHits'), String(fs.total)]];
+  if (fs.ops.read) rows.push([t('lblRead'), String(fs.ops.read)]);
+  if (fs.ops.grep) rows.push([t('lblSearch'), String(fs.ops.grep)]);
+  if (fs.ops.edit) rows.push([t('lblEdit'), String(fs.ops.edit)]);
+  if (fs.errs) rows.push([t('lblFailed'), String(fs.errs)]);
+  if (fs.plus) rows.push([t('lblAdded'), '+'+fs.plus]);
+  if (fs.minus) rows.push([t('lblRemoved'), '−'+fs.minus]);
+  if (fs.tokens) rows.push([t('lblTok'), '~'+fmtTok(fs.tokens)]);
+  if (fs.agents.size>1) rows.push([t('lblAgents'), [...fs.agents].join(', ')]);
+  const opt = {};
+  if (fs.gone){ opt.flag = t('flagGone'); opt.bad = true; }
+  else if (fs.reads>=4){ opt.flag = t('flagReread',{n:fs.reads}); opt.bad = fs.reads>=7; }
+  else if (isWastePath(p)){ opt.flag = t('flagJunk'); }
+  if (openable) opt.note = t('openTip');
+  return tipBox(p, rows, opt);
+}
+function cellEl(title, seed){
+  const el = document.createElement('div');
+  el.className = 'mc un';
+  el.style.transform = `rotate(${((seed%100)/100-0.5)*7}deg)`;
+  el.style.filter = `url(#squig${seed%4})`;      // 셀마다 다른 손그림 패턴
+  el.dataset.tip = title;
+  return el;
+}
+function bandEl(n, title){
+  const el = document.createElement('span');
+  el.className = 'band';
+  el.textContent = `⋯ ${n.toLocaleString()} ⋯`;
+  el.style.filter = `url(#squig${hash(title)%4})`;
+  el.dataset.tip = title;
+  return el;
+}
+/* 공용 두들 툴팁: data-tip 달린 모든 요소에 트리맵과 같은 스타일 */
+const dtip = document.createElement('div');
+dtip.className = 'tmtip dtip';
+document.body.appendChild(dtip);
+let dtipOn = false, dtipLast = '';
+document.addEventListener('mousemove', e=>{
+  const el = e.target.closest && e.target.closest('[data-tip]');
+  const tip = el && el.dataset.tip;
+  if (!tip){
+    if (dtipOn){ dtip.classList.remove('show'); dtipOn = false; dtipLast = ''; }
+    return;
+  }
+  if (tip !== dtipLast){ dtip.innerHTML = tip; dtipLast = tip; }
+  if (!dtipOn){ dtip.classList.add('show'); dtipOn = true; }
+  const tw = dtip.offsetWidth, th = dtip.offsetHeight;
+  dtip.style.left = Math.max(6, Math.min(innerWidth-tw-8, e.clientX+14))+'px';
+  dtip.style.top = (e.clientY-th-12 < 4 ? e.clientY+16 : e.clientY-th-12)+'px';
+});
+const NOW_MS = 9000;                       // how long a touch stays highlighted
+function isNow(p){ return !!(S.now && S.now.file === p && Date.now()-S.now.ts < NOW_MS); }
+function markTMNow(){                      // ring rides above the canvas: no redraw to pulse
+  const el = $('tmNow');
+  const r = (S.now && Date.now()-S.now.ts < NOW_MS)
+    ? TM_RECTS.find(x=>!x.agg && x.path === S.now.file) : null;
+  if (!r){ el.hidden = true; return; }
+  el.style.left = (r.x-2)+'px'; el.style.top = (r.y-2)+'px';
+  el.style.width = (r.w+4)+'px'; el.style.height = (r.h+4)+'px';
+  el.hidden = false;
+}
+const K = 3;
+function fogTree(){
+  // universe dirs + any dirs touched outside the universe (absolute paths, web, etc.)
+  const base = UNIVERSE ? UNIVERSE.tree : [];
+  const known = new Set(base.map(([d])=>d));
+  const extra = new Map();
+  for (const [p] of S.files){
+    const d = dirOf(p);
+    if (known.has(d)) continue;
+    if (!extra.has(d)) extra.set(d, []);
+    extra.get(d).push(p.split('/').pop());
+  }
+  return base.concat([...extra.entries()]);
+}
+function updateFog(){
+  const box = $('fogMap');
+  const nowIx = Math.floor(Date.now()/BUCKET);
+  const hitsByDir = new Map();
+  for (const [p,fs] of S.files){
+    const d = dirOf(p);
+    if (!hitsByDir.has(d)) hitsByDir.set(d, []);
+    hitsByDir.get(d).push([p,fs]);
+  }
+  let maxD = 2;
+  for (const [,fs] of S.files){ const v = heatScore(fs,nowIx); if (v>maxD) maxD = v; }
+
+  const frag = document.createDocumentFragment();
+  let quietFiles = 0, quietDirs = [];
+  const flushQuiet = ()=>{
+    if (!quietFiles) return;
+    const band = document.createElement('span');
+    band.className = 'band wide';
+    band.textContent = t('quietBand', {n: quietFiles.toLocaleString(), m: quietDirs.length});
+    band.dataset.tip = tipBox(t('quietBandTitle'),
+      [[t('lblFiles'), quietFiles.toLocaleString()], [t('lblUnexplored'), String(quietDirs.length)]],
+      {note: quietDirs.slice(0,6).join(', ') + (quietDirs.length>6?', …':'')});
+    frag.appendChild(band);
+    quietFiles = 0; quietDirs = [];
+  };
+
+  for (const [dir, names] of fogTree()){
+    const hits = hitsByDir.get(dir) || [];
+    if (!hits.length){ quietFiles += names.length; quietDirs.push(dir+'/'); continue; }
+    flushQuiet();
+    const named = names.slice().sort();
+    const len = named.length;
+    const hitIx = new Map();
+    for (const [p,fs] of hits){
+      const ix = named.indexOf(p.split('/').pop());
+      if (ix>=0) hitIx.set(ix, [p,fs]);
+    }
+    const revealed = new Set();
+    for (const ix of hitIx.keys())
+      for (let j=Math.max(0,ix-K); j<=Math.min(len-1,ix+K); j++) revealed.add(j);
+
+    const row = document.createElement('div');
+    row.className = 'fgrow';
+    const lab = document.createElement('span');
+    lab.className = 'ilab';
+    const depth = dir.startsWith('(') ? 0 : (dir.match(/\//g)||[]).length + 1;
+    lab.style.paddingLeft = (Math.min(depth,5)*11)+'px';
+    lab.textContent = dir.startsWith('(') ? dir : dirLabel(dir,3)+(dir===ROOT?'':'/');
+    lab.dataset.tip = tipBox(dir+'/', [[t('lblFiles'), String(len)],
+      [t('lblTouched'), String(hits.length)], [t('lblHits'), String(hits.reduce((a,[,f])=>a+f.total,0))]],
+      {note: t('openTip')});
+    if (!dir.startsWith('(')){
+      lab.classList.add('openable');
+      lab.addEventListener('click', (e)=> openTarget(dir, e));
+    }
+    const cells = document.createElement('span');
+    cells.className = 'fgcells';
+    row.append(lab, cells);
+    let i = 0;
+    while (i < len){
+      if (!revealed.has(i)){
+        let j = i; while (j<len && !revealed.has(j)) j++;
+        cells.appendChild(bandEl(j-i, tipBox(dir+'/', [[t('lblUnexplored'), String(j-i)]])));
+        i = j; continue;
+      }
+      const nm = named[i];
+      const path = dir==='(root)' || dir.startsWith('(') ? nm : dir+'/'+nm;
+      const hit = hitIx.get(i);
+      const el = cellEl(tipBox(path, [[t('lblStatus'), t('sUntouched')]]), hash(path));
+      if (hit){
+        const [p,fs] = hit;
+        const sc = heatScore(fs, nowIx);
+        const a = Math.round((0.14 + 0.72*Math.sqrt(sc/maxD))*100);
+        el.classList.remove('un');
+        // 크레용 빗금 채움: 스트로크 방향이 파일마다 조금씩 다름
+        el.style.background = `repeating-linear-gradient(${100+(hash(p)%40)}deg,
+          color-mix(in srgb, ${PAL.heat} ${a}%, transparent) 0 2px,
+          color-mix(in srgb, ${PAL.heat} ${Math.round(a*0.5)}%, transparent) 2px 4.5px)`;
+        el.style.borderColor = fs.reads>=4 ? PAL.del : opCol(domOp(fs.ops));
+        if (sc/maxD > 0.5) el.style.boxShadow = `0 0 10px color-mix(in srgb, ${PAL.heat} 55%, transparent)`;
+        el.dataset.tip = fileTip(p, fs, true);
+        el.classList.add('openable');
+        if (isNow(p)) el.classList.add('now');
+        if (fs.gone) el.classList.add('gone');
+        if (fs.errs) el.classList.add('err');
+        el.addEventListener('click', (e)=> openTarget(p, e));
+        if (fs.ops.edit>0) el.innerHTML = '<span class="em">✎</span>';
+      }
+      cells.appendChild(el);
+      i++;
+    }
+    frag.appendChild(row);
+  }
+  flushQuiet();
+  box.replaceChildren(frag);
+  const total = UNIVERSE ? UNIVERSE.total : 0;
+  const inU = UNIVERSE ? [...S.files.keys()].filter(p=>UNIVERSE.set.has(p)).length : S.files.size;
+  $('cov').textContent = total ? t('coverage', {a:inU, b:total, p:Math.round(inU/total*100)}) : '';
+}
+
+/* ══ treemap — crayon ══ */
+const tm = $('tm'), tmx = tm.getContext('2d');
+let TM_RECTS = [];
+function squarify(items, x, y, w, h){
+  let i = 0;
+  while (i < items.length && w > 0.5 && h > 0.5){
+    const horiz = w >= h;
+    const side = horiz ? h : w;
+    const total = items.slice(i).reduce((a,b)=>a+b.wt,0);
+    const area = w*h;
+    let rowSum = 0, best = Infinity, count = 1;
+    for (let j=i; j<items.length; j++){
+      rowSum += items[j].wt;
+      const thick = (rowSum/total)*area/side;
+      let worst = 0;
+      for (let k=i; k<=j; k++){
+        const len = items[k].wt/rowSum*side;
+        worst = Math.max(worst, thick/Math.max(1e-6,len), len/Math.max(1e-6,thick));
+      }
+      if (worst <= best){ best = worst; count = j-i+1; } else break;
+    }
+    const rowW = items.slice(i, i+count).reduce((a,b)=>a+b.wt,0);
+    const thick = (rowW/total)*area/side;
+    let off = 0;
+    for (let k=i; k<i+count; k++){
+      const len = items[k].wt/rowW*side;
+      items[k].rect = horiz ? {x, y:y+off, w:thick, h:len} : {x:x+off, y, w:len, h:thick};
+      off += len;
+    }
+    if (horiz){ x += thick; w -= thick; } else { y += thick; h -= thick; }
+    i += count;
+  }
+}
+function wavyLine(c, x1, y1, x2, y2, rnd, wob){
+  const dx = x2-x1, dy = y2-y1, len = Math.hypot(dx,dy) || 1;
+  const nx = -dy/len, ny = dx/len;
+  const n = Math.max(2, Math.round(len/7));
+  const o = () => (rnd()-0.5)*wob;
+  c.moveTo(x1 + o() - dx/len*1.5, y1 + o() - dy/len*1.5);   // 모서리 삐침
+  for (let i=1;i<=n;i++){
+    const t2 = i/n, j = (rnd()-0.5)*wob;
+    c.lineTo(x1+dx*t2+nx*j + (i===n ? dx/len*1.5 : 0), y1+dy*t2+ny*j + (i===n ? dy/len*1.5 : 0));
+  }
+}
+function crayonRect(c, r, col, lw, seed){
+  // 네 변을 각각 지터 폴리라인으로 — 모서리가 어긋나며 손그림 느낌
+  const rnd = mulberry(seed ?? hash((r.x|0)+':'+(r.y|0)));
+  const wob = Math.min(2.6, 1.2 + lw*0.5);
+  c.strokeStyle = col; c.lineWidth = lw;
+  c.lineJoin = 'round'; c.lineCap = 'round';
+  const x1=r.x+1, y1=r.y+1, x2=r.x+r.w-1, y2=r.y+r.h-1;
+  for (let k=0;k<2;k++){
+    c.beginPath();
+    wavyLine(c, x1, y1, x2, y1, rnd, wob);
+    wavyLine(c, x2, y1, x2, y2, rnd, wob);
+    wavyLine(c, x2, y2, x1, y2, rnd, wob);
+    wavyLine(c, x1, y2, x1, y1, rnd, wob);
+    c.stroke();
+  }
+}
+// crayon shading: soft base + wide diagonal strokes, direction seeded per cell
+function crayonFill(c, x, y, w, h, alpha, seed){
+  const rnd = mulberry(seed);
+  c.save();
+  c.beginPath(); c.rect(x, y, w, h); c.clip();
+  c.fillStyle = PAL.heat;
+  c.globalAlpha = alpha*0.45;
+  c.fillRect(x, y, w, h);
+  c.globalAlpha = alpha*0.55;
+  c.strokeStyle = PAL.heat;
+  c.lineWidth = 3;
+  c.beginPath();
+  const slant = 0.7 + rnd()*0.6;
+  for (let sx = x - h*slant; sx < x + w; sx += 5.5){
+    const j = (rnd()-0.5)*2.2;
+    c.moveTo(sx + j, y + h + 1);
+    c.lineTo(sx + h*slant + j, y - 1);
+  }
+  c.stroke();
+  c.restore();
+  c.globalAlpha = 1;
+}
+function drawTM(){
+  const rct = tm.getBoundingClientRect();
+  if (!rct.width || !S) return;
+  const DPR = Math.min(devicePixelRatio||1, 2);
+  const W = rct.width, H = 320;
+  tm.width = W*DPR; tm.height = H*DPR;
+  tmx.setTransform(DPR,0,0,DPR,0,0);
+  tmx.clearRect(0,0,W,H);
+  const nowIx = Math.floor(Date.now()/BUCKET);
+  const FACE = css().getPropertyValue('--hand').trim() || 'cursive';
+  const FONT = '700 15px '+FACE;
+  const fit = (txt, maxW, weight) => {     // shrink to fit, then ellipsize keeping the extension
+    for (const sz of [15, 13.5, 12, 10.5]){
+      tmx.font = `${weight} ${sz}px ${FACE}`;
+      if (tmx.measureText(txt).width <= maxW) return txt;
+    }
+    const m = txt.match(/^(.*?)(\.[A-Za-z0-9]{1,6})$/);
+    let base = m ? m[1] : txt; const ext = m ? m[2] : '';
+    while (base.length > 2 && tmx.measureText(base+'…'+ext).width > maxW) base = base.slice(0,-1);
+    return base+'…'+ext;
+  };
+  const plate = (txt, x, y, fg) => {       // paper plate keeps text readable over crayon
+    const w = tmx.measureText(txt).width;
+    tmx.globalAlpha = .78; tmx.fillStyle = PAL.paper;
+    tmx.fillRect(x-3, y-12, w+6, 16);
+    tmx.globalAlpha = 1; tmx.fillStyle = fg;
+    tmx.fillText(txt, x, y);
+  };
+  TM_RECTS = [];
+  let maxD = 2;
+  for (const [,fs] of S.files){ const v = heatScore(fs,nowIx); if (v>maxD) maxD = v; }
+
+  const byDir = new Map();
+  for (const [p,fs] of S.files){
+    const d = dirOf(p);
+    if (!byDir.has(d)) byDir.set(d, {dir:d, hits:0, files:[]});
+    const e = byDir.get(d); e.hits += fs.total; e.files.push({path:p, fs});
+  }
+  const dirTotals = new Map((UNIVERSE?UNIVERSE.tree:[]).map(([d,ns])=>[d,ns.length]));
+  const dirs = [...byDir.values()].map(d=>({...d, wt:d.hits})).sort((a,b)=>b.wt-a.wt);
+  if (!dirs.length){
+    tmx.font = FONT; tmx.fillStyle = PAL.ink3; tmx.textAlign='center';
+    tmx.fillText(t('noActivity'), W/2, H/2);
+    return;
+  }
+  squarify(dirs, 2, 2, W-4, H-4);
+
+  for (const d of dirs){
+    const r = d.rect;
+    if (!r || r.w<3 || r.h<3) continue;
+    const totalF = dirTotals.get(d.dir) || d.files.length;
+    crayonRect(tmx, r, isWastePath(d.dir+'/') ? PAL.warn : PAL.ink3, 2.7, hash(d.dir)); // 폴더 외곽 = 굵은 크레용
+    const showLab = r.w > 78 && r.h > 34;
+    if (showLab){
+      tmx.font = FONT;
+      tmx.textAlign = 'left';
+      tmx.save();
+      tmx.beginPath(); tmx.rect(r.x+2, r.y, r.w-4, r.h); tmx.clip();
+      const dl = (d.dir.startsWith('(')?d.dir:dirLabel(d.dir,2)+(d.dir===ROOT?'':'/'))
+        + ` ${d.files.length}/${totalF} · ${d.hits}h`;
+      plate(fit(dl, r.w-14, 700), r.x+7, r.y+17, isWastePath(d.dir+'/') ? PAL.warn : PAL.ink2);
+      tmx.restore();
+    }
+    TM_RECTS.push({...r, dir:d.dir, agg:true, count:totalF, hits:d.hits, touched:d.files});
+    const padT = showLab ? 23 : 4, pad = 4;
+    const ix0 = r.x+pad, iy0 = r.y+padT, iw = r.w-pad*2, ih = r.h-padT-pad;
+    if (iw < 10 || ih < 10) continue;
+    const items = d.files.map(f=>({...f, wt: Math.max(1, f.fs.total)})).sort((a,b)=>b.wt-a.wt);
+    squarify(items, ix0, iy0, iw, ih);
+    for (const it of items){
+      const c = it.rect;
+      if (!c || c.w<4 || c.h<4) continue;
+      const cell = {x:c.x+1, y:c.y+1, w:c.w-2, h:c.h-2};
+      const fs = it.fs;
+      const sc = heatScore(fs, nowIx);
+      const rel = sc/maxD;
+      const rnd = mulberry(hash(it.path));
+      tmx.save();
+      tmx.translate(cell.x+cell.w/2, cell.y+cell.h/2);
+      tmx.rotate((rnd()-0.5)*0.05);
+      crayonFill(tmx, -cell.w/2+2, -cell.h/2+2, cell.w-4, cell.h-4,
+        0.14 + 0.72*Math.sqrt(rel), hash(it.path)+3);
+      if (rel > 0.6 && cell.w > 14){       // extra scribble on the hottest cells
+        tmx.globalAlpha = 0.45;
+        tmx.strokeStyle = PAL.heat; tmx.lineWidth = 1.2;
+        tmx.beginPath();
+        for (let sx=-cell.w/2+4; sx<cell.w/2-4; sx+=5)
+          { tmx.moveTo(sx+rnd()*2, -cell.h/2+3); tmx.lineTo(sx+3+rnd()*2, cell.h/2-3); }
+        tmx.stroke();
+      }
+      tmx.restore();
+      tmx.globalAlpha = 1;
+      crayonRect(tmx, cell, fs.reads>=4 ? PAL.del : opCol(domOp(fs.ops)), 1.4, hash(it.path)+7);
+      if (cell.w > 40 && cell.h > 19){
+        tmx.textAlign='left';
+        tmx.save();
+        tmx.beginPath(); tmx.rect(cell.x+1, cell.y, cell.w-2, cell.h); tmx.clip();
+        plate(fit((fs.gone?'✕ ':'') + (fs.ops.edit>0?'✎ ':'') + it.path.split('/').pop(), cell.w-12, 600),
+          cell.x+5, cell.y+16, PAL.ink);
+        // second line only when the rectangle can hold it
+        if ((fs.plus || fs.minus) && cell.h > 36 && cell.w > 58){
+          tmx.font = '700 13px '+FACE;
+          const parts = [];
+          if (fs.plus) parts.push(['+'+fs.plus, PAL.good]);
+          if (fs.minus) parts.push(['−'+fs.minus, PAL.del]);
+          let x = cell.x+5;
+          const wAll = parts.reduce((a,[txt])=>a+tmx.measureText(txt).width+6, 0);
+          if (wAll <= cell.w-10){
+            tmx.globalAlpha = .8; tmx.fillStyle = PAL.paper;
+            tmx.fillRect(cell.x+2, cell.y+19, wAll+4, 15);
+            tmx.globalAlpha = 1;
+            for (const [txt, col] of parts){
+              tmx.fillStyle = col;
+              tmx.fillText(txt, x, cell.y+31);
+              x += tmx.measureText(txt).width + 6;
+            }
+          }
+        }
+        tmx.restore();
+      }
+      TM_RECTS.push({...cell, path:it.path, fs, dir:d.dir});
+    }
+  }
+}
+tm.addEventListener('mousemove', e=>{
+  const b = tm.getBoundingClientRect();
+  const mx = e.clientX-b.left, my = e.clientY-b.top;
+  let hit = null;
+  for (const r of TM_RECTS)
+    if (mx>=r.x && mx<=r.x+r.w && my>=r.y && my<=r.y+r.h && !r.agg){ hit = r; break; }
+  if (!hit) for (const r of TM_RECTS)
+    if (mx>=r.x && mx<=r.x+r.w && my>=r.y && my<=r.y+r.h){ hit = r; break; }
+  if (!hit){ delete tm.dataset.tip; tm.classList.remove('openable'); return; }
+  tm.classList.toggle('openable', !String(hit.agg ? hit.dir : hit.path).startsWith('('));
+  const tc = hit.touched||[];
+  tm.dataset.tip = hit.agg
+    ? tipBox(hit.dir+'/', [[t('lblHits'), String(hit.hits)],
+        [t('lblTouched'), `${tc.length} / ${hit.count}`]],
+        {note: tc.slice(0,4).map(f=>f.path.split('/').pop()).join(', ')+(tc.length>4?', …':''),
+         flag: isWastePath(hit.dir+'/') ? t('flagJunk') : null})
+    : fileTip(hit.path, hit.fs, true);
+});
+tm.addEventListener('mouseleave', ()=> { delete tm.dataset.tip; tm.classList.remove('openable'); });
+tm.addEventListener('click', e=>{
+  const b = tm.getBoundingClientRect();
+  const mx = e.clientX-b.left, my = e.clientY-b.top;
+  let hit = null;
+  for (const r of TM_RECTS)
+    if (mx>=r.x && mx<=r.x+r.w && my>=r.y && my<=r.y+r.h && !r.agg){ hit = r; break; }
+  if (!hit) for (const r of TM_RECTS)
+    if (mx>=r.x && mx<=r.x+r.w && my>=r.y && my<=r.y+r.h){ hit = r; break; }
+  if (!hit) return;
+  const target = hit.agg ? hit.dir : hit.path;
+  if (target && !target.startsWith('(')) openTarget(target, e);
+});
+
+/* ══ temporal strips ══ */
+const rowEls = new Map();
+let heatMax = 3;
+const RANGES = [['5m', 5*60e3], ['1h', 60*60e3], ['all', 0]];
+let heatRange = (()=>{ try{ return localStorage.getItem('cs-range') || '5m'; }catch(e){ return '5m'; } })();
+function heatWindow(){
+  const now = Date.now();
+  const r = RANGES.find(x=>x[0]===heatRange) || RANGES[0];
+  const start = r[1] ? now - r[1] : (S.firstTs || now - 5*60e3);
+  return {start, now, col: Math.max(1000, (now - start)/COLS)};
+}
+function binHits(fs, win){                 // hb is keyed by 10s bucket; fold into columns
+  const cols = new Array(COLS).fill(0);
+  for (const k in fs.hb){
+    const ts = Number(k)*BUCKET;
+    if (ts < win.start || ts > win.now) continue;
+    const i = Math.min(COLS-1, Math.floor((ts - win.start)/win.col));
+    cols[i] += fs.hb[k];
+  }
+  return cols;
+}
+function renderRanges(){
+  const box = $('heatRange');
+  box.innerHTML = '';
+  for (const [key] of RANGES){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = heatRange===key ? 'on' : '';
+    b.textContent = key === 'all' ? t('rangeAll') : key;
+    b.addEventListener('click', ()=>{
+      heatRange = key;
+      try{ localStorage.setItem('cs-range', key); }catch(e){}
+      renderRanges(); drawAllStrips();
+    });
+    box.appendChild(b);
+  }
+  const win = heatWindow();
+  $('rulerL').textContent = (heatRange==='all' && !S.firstTs)
+    ? t('spanNone') : t('spanStart', {a: fmtAgo(win.now - win.start)});
+}
+function drawStrip(path, win){
+  const r = rowEls.get(path); if (!r) return;
+  const fs = S.files.get(path); if (!fs) return;
+  win = win || heatWindow();
+  const cv = r.cv, ctx = cv.getContext('2d');
+  const DPR = Math.min(devicePixelRatio||1, 2);
+  const w = cv.clientWidth || 300, h = 18;
+  cv.width = w*DPR; cv.height = h*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,w,h);
+  const cols = binHits(fs, win);
+  const cw = w/COLS;
+  for (let i=0;i<COLS;i++){
+    const n = cols[i];
+    if (!n) continue;
+    const t2 = Math.min(1, Math.sqrt(n/heatMax));
+    const rnd = mulberry(hash(path) + i);
+    ctx.save();
+    ctx.translate(i*cw + cw/2, h/2);
+    ctx.rotate((rnd()-0.5)*0.16);
+    ctx.fillStyle = PAL.heat;
+    ctx.globalAlpha = 0.22 + t2*0.42;
+    for (let k=0;k<2;k++){
+      const jx=(rnd()-0.5)*2.4, jy=(rnd()-0.5)*2.4;
+      ctx.fillRect(-cw/2+1.5+jx, -h/2+3+jy, cw-3, h-6);
+    }
+    if (t2 > 0.62){
+      ctx.globalAlpha = 0.5 + t2*0.3;
+      ctx.strokeStyle = PAL.heat; ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      for (let sx=-cw/2+2; sx<cw/2-2; sx+=3.2){
+        ctx.moveTo(sx + rnd()*1.5, -h/2+3);
+        ctx.lineTo(sx+2.2 + rnd()*1.5, h/2-3);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+function drawAllStrips(){
+  const win = heatWindow();
+  heatMax = 3;
+  for (const fs of S.files.values())
+    for (const n of binHits(fs, win)) if (n > heatMax) heatMax = n;
+  for (const path of rowEls.keys()) drawStrip(path, win);
+  renderRanges();
+}
+const MAX_ROWS = 24;
+function renderRows(){
+  const box = $('rows');
+  const dirs = new Map();
+  for (const [p,s] of S.files){
+    const d = dirOf(p);
+    if (!dirs.has(d)) dirs.set(d, {name:d, files:[], seen:s.firstIx, hits:0});
+    const e = dirs.get(d); e.files.push([p,s]); e.seen = Math.min(e.seen, s.firstIx); e.hits += s.total;
+  }
+  const groups = [...dirs.values()].sort((a,b)=>a.seen-b.seen);
+  for (const d of groups) d.files.sort((a,b)=>a[1].firstIx-b[1].firstIx);
+  const top = new Set([...S.files.entries()].sort((a,b)=>b[1].total-a[1].total)
+    .slice(0,MAX_ROWS).map(([p])=>p));
+
+  const frag = document.createDocumentFragment();
+  let quietN = 0, quietHits = 0; const quietNames = [];
+  const now = Date.now();
+  for (const d of groups){
+    const shown = d.files.filter(([p])=>top.has(p));
+    if (shown.length){
+      const dh = document.createElement('div');
+      dh.className = 'drow'+(isWastePath(d.name+'/')?' waste':'');
+      dh.innerHTML = `<u>${esc(dirLabel(d.name,3))}${d.name.startsWith('(')||d.name===ROOT?'':'/'}</u> <span class="dh">${t('dirHits',{n:d.hits})}</span>`;
+      frag.appendChild(dh);
+    }
+    for (const [p,s] of d.files){
+      if (!top.has(p)){ quietN++; quietHits += s.total; if (quietNames.length<4) quietNames.push(p.split('/').pop()); continue; }
+      let r = rowEls.get(p);
+      if (!r){
+        const el = document.createElement('div');
+        el.className = 'frow';
+        el.innerHTML = `<span class="nm"><span class="opdot">●</span><span class="fn"></span><span class="mk"></span></span>
+          <canvas></canvas><span class="val"><span class="lines"></span> <b></b><span class="dl"></span></span>`;
+        r = { el, cv: el.querySelector('canvas'),
+          parts:{ dot: el.querySelector('.opdot'), fn: el.querySelector('.fn'), mk: el.querySelector('.mk'),
+                  tot: el.querySelector('.val b'), dl: el.querySelector('.dl'),
+                  lines: el.querySelector('.lines') } };
+        r.parts.fn.textContent = p.split('/').pop();
+        rowEls.set(p, r);
+      }
+      r.parts.dot.style.color = opCol(domOp(s.ops));
+      r.parts.tot.textContent = s.total;
+      const live = s.delta>0 && (now - s.deltaT) < 15000;
+      r.parts.dl.textContent = live ? '+'+s.delta : '';
+      r.parts.lines.innerHTML = lineDelta(s);
+      r.el.classList.toggle('gone', !!s.gone);
+      let mk = '';
+      if (s.errs) mk += `<span class="er">✗${s.errs>1?s.errs:''}</span> `;
+      if (s.gone) mk += '<span class="rr">✕</span> ';
+      if (s.ops.edit>0) mk += '<span class="ed">✎</span> ';
+      if (s.reads>=4) mk += `<span class="rr">×${s.reads}</span>`;
+      else if (isWastePath(p)) mk += `<span class="rw">!</span>`;
+      r.parts.mk.innerHTML = mk;
+      r.el.dataset.tip = fileTip(p, s, true);
+      if (!r.el.dataset.wired){
+        r.el.dataset.wired = '1';
+        r.el.classList.add('openable');
+        r.el.addEventListener('click', (e)=> openTarget(p, e));
+      }
+      frag.appendChild(r.el);
+    }
+  }
+  box.replaceChildren(frag);
+  $('quiet').textContent = quietN
+    ? t('quietLine', {n:quietN, h:quietHits, names: quietNames.join(', ')+(quietN>4?', …':'')})
+    : '';
+  drawAllStrips();
+}
+
+/* ══ header ══ */
+function fmtAgo(ms){
+  const m = Math.max(1, Math.round(ms/60000));
+  if (m < 60) return t('agoM', {n:m});
+  const h = Math.round(m/60);
+  return h < 24 ? t('agoH', {n:h}) : t('agoD', {n:Math.round(h/24)});
+}
+let sessExpanded = false;
+const SESS_SHOWN = 5;
+function renderSessLinks(){
+  const box = $('sessLinks');
+  box.innerHTML = '';
+  const now = Date.now();
+  const live = SESSIONS.filter(s=>s.active);
+  const rest = SESSIONS.filter(s=>!s.active);
+  const shown = sessExpanded ? live.concat(rest)
+    : live.concat(rest.slice(0, Math.max(1, SESS_SHOWN - live.length)));
+  const hidden = SESSIONS.length - shown.length;
+
+  for (const sess of shown){
+    const age = now - sess.mtimeMs;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'slink'
+      + (S && S.id===sess.id ? ' on' : '')
+      + (sess.active ? ' live' : age < 12*3600e3 ? ' fresh' : ' old');
+    b.innerHTML = `${esc(sess.title || sess.id.slice(0,8))} <span class="st">`
+      + (sess.active ? t('liveNow') : t('doneAt', {a: fmtAgo(age)})) + `</span>`;
+    b.addEventListener('click', ()=>selectSession(sess.id));
+    box.appendChild(b);
+  }
+  if (hidden > 0 || sessExpanded){
+    const m = document.createElement('button');
+    m.type = 'button';
+    m.className = 'slink more';
+    m.textContent = sessExpanded ? t('lessSess') : t('moreSess', {n: hidden});
+    m.addEventListener('click', ()=>{ sessExpanded = !sessExpanded; renderSessLinks(); });
+    box.appendChild(m);
+  }
+}
+let tasksFolded = (()=>{ try{ return localStorage.getItem('cs-fold')==='1'; }catch(e){ return false; } })();
+function renderAgents(){
+  const box = $('agents');
+  box.innerHTML = '';
+  const startOf = ([nm, a]) => (a.task && a.task.start) || a.firstTs || Infinity;   // spawn order
+  const rows = [...S.agents.entries()].sort((x,y)=>
+    x[0]==='main' ? -1 : y[0]==='main' ? 1 : startOf(x)-startOf(y) || x[0].localeCompare(y[0]));
+  const subs = rows.length - 1;
+  const TASK_LIMIT = 12;
+  const skipped = Math.max(0, subs - TASK_LIMIT);
+  const visible = new Set(rows.filter(([nm])=>nm!=='main').slice(-TASK_LIMIT).map(([nm])=>nm));
+  for (const [nm, a] of rows){
+    if (nm !== 'main' && (tasksFolded || !visible.has(nm))) continue;
+    const on = S.filter === nm, off = S.filter && !on;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'al agl' + (on?' on':'') + (off?' off':'');
+    b.dataset.tip = tipBox(nm==='main'? 'main' : nm,
+      [[t('lblModel'), prettyModel(a.model)||'—'], [t('lblCalls'), String(a.count)],
+       [t('lblIn'), fmtTok(a.tin)], [t('lblOut'), fmtTok(a.tout)],
+       ...(a.errs ? [[t('lblFailed'), String(a.errs)]] : []),
+       ...(costOf(a).known ? [['≈', fmtUsd(costOf(a).usd)]] : [])],
+      {flag: on ? t('flagFilterOn') : t('flagFilterOff')});
+    b.innerHTML = (nm==='main'
+        ? `<span class="nw"><span class="dot">●</span> <b>main</b>`
+        : `<span class="nw"><span class="sub">└╌ task ▶</span> <span class="dot">○</span> <b>${esc(nm)}</b>`)
+      + (a.model ? ` — ${modelBadge(a.model)}` : '')
+      + `</span> <span class="tk">${t('agentStats',{count:a.count, tin:fmtTok(a.tin), tout:fmtTok(a.tout)})}</span>`;
+    b.addEventListener('click', ()=> setFilter(nm));
+    box.appendChild(b);
+    if (nm === 'main'){                    // is the session working right now, and on what
+      const sess = SESSIONS.find(x=>x.id===S.id);
+      const live = sess && sess.active;
+      const bits = [live ? `<span class="run">${t('mainRun')}</span>` : t('mainIdle')];
+      if (a.lastOp){
+        const f = a.lastOp === 'bash' ? String(a.lastFile).slice(0,28)+'…' : String(a.lastFile).split('/').pop();
+        bits.push(`<span class="q">${esc(t('lastDo', {op:(OP_LABEL[a.lastOp]||a.lastOp).toLowerCase(), f}))}</span>`);
+      }
+      if (a.lastTs) bits.push(fmtAgo(Date.now()-a.lastTs));
+      if (S.firstTs && a.lastTs > S.firstTs) bits.push(`<span class="dur">${t('spanFor',{d:fmtDur(a.lastTs-S.firstTs)})}</span>`);
+      const br = document.createElement('span');
+      br.className = 'brief main';
+      br.innerHTML = bits.join(' · ');
+      box.appendChild(br);
+    }
+    if (nm !== 'main'){                    // what this task was asked to do, and how it went
+      const tk = a.task || {};
+      // duration: the Task call's own start→result when we have it, else the
+      // span of the agent's own transcript. Never mix the two.
+      // Two clocks, both partial: spawn→result from the parent (sometimes written
+      // ~0.1s apart) and the agent's own first→last op. The work took at least
+      // the longer of the two.
+      const paired = tk.start && tk.end ? tk.end - tk.start : 0;
+      const span = a.lastTs && a.firstTs ? a.lastTs - a.firstTs : 0;
+      const dur = Math.max(paired, span);
+      const started = tk.start || a.firstTs;
+      const liveSess = SESSIONS.find(x=>x.id===S.id)?.active;
+      const running = (tk.start && !tk.end) ||
+        (!tk.start && liveSess && a.lastTs && Date.now()-a.lastTs < 60000);
+      const bits = [];
+      if (tk.desc) bits.push(`<span class="q">“${esc(tk.desc)}”</span>`);
+      if (running) bits.push(`<span class="run">${t('taskRun')}</span>`);
+      else if (dur >= 1000) bits.push(`<span class="dur">${t('taskDone',{d:fmtDur(dur)})}</span>`);
+      else if (a.count) bits.push(`<span class="dur">${t('taskQuick')}</span>`);
+      if (started) bits.push(t('taskSpawn',{a:fmtAgo(Date.now()-started)}));
+      if (bits.length){
+        const br = document.createElement('span');
+        br.className = 'brief';
+        br.innerHTML = bits.join(' · ');
+        box.appendChild(br);
+      }
+    }
+    if (nm === 'main' && subs > 0){        // fold / unfold the task list
+      const f = document.createElement('button');
+      f.type = 'button';
+      f.className = 'fold';
+      const word = t(subs === 1 ? 'taskWord' : 'taskWords');
+      f.textContent = tasksFolded ? t('foldTasks',{n:subs, s:word}) : t('showTasks',{n:subs, s:word});
+      f.addEventListener('click', ()=>{
+        tasksFolded = !tasksFolded;
+        try{ localStorage.setItem('cs-fold', tasksFolded?'1':'0'); }catch(e){}
+        if (tasksFolded && S.filter && S.filter !== 'main') setFilter(S.filter);  // reset a hidden filter
+        else renderAgents();
+      });
+      b.insertAdjacentElement('afterend', f);
+    }
+  }
+  if (skipped && !tasksFolded){
+    const more = document.createElement('div');
+    more.className = 'aghint';
+    more.textContent = t('earlierTasks', {n: skipped});
+    box.appendChild(more);
+  }
+  if (S.agents.size > 1 && !tasksFolded){
+    const h = document.createElement('div');
+    h.className = 'aghint';
+    h.textContent = S.filter ? t('filterOn', {a:S.filter}) : t('filterHint');
+    box.appendChild(h);
+  }
+}
+function renderStats(){
+  const ops = Object.values(S.opCount).reduce((a,b)=>a+b,0);
+  const reads = [...S.files.values()].reduce((a,f)=>a+f.reads,0);
+  const uniqR = [...S.files.values()].filter(f=>f.reads>0).length;
+  const rr = reads ? Math.max(0, Math.round((reads-uniqR)/reads*100)) : 0;
+  let fresh = 0, cw = 0, cr = 0, tout = 0, errs = 0, usd = 0, unpriced = new Set();
+  for (const [nm,a] of S.agents){
+    if (S.filter && nm !== S.filter) continue;
+    fresh += a.fresh; cw += a.cw; cr += a.cr; tout += a.tout; errs += a.errs;
+    const c = costOf(a);
+    if (c.known) usd += c.usd; else if (a.model) unpriced.add(prettyModel(a.model));
+  }
+  const rrHtml = `<span class="${rr>=45?'alert':''}"><b>${rr}%</b></span>`;
+  $('statline').innerHTML = t('statline', {ops, files:S.files.size, rr:rrHtml,
+    err: errs ? t('errChip',{n:errs}) : ''});
+  // cached input is ~10× cheaper than fresh input, so never show them as one number
+  const cache = cw + cr, all = fresh + cache;
+  const cost = usd ? t('costEst',{v:fmtUsd(usd)})
+    : (unpriced.size ? t('costUnknown',{m:[...unpriced].join(', ')}) : '');
+  $('costline').innerHTML = t('costline', {
+    fresh: fmtTok(fresh), cache: fmtTok(cache),
+    hit: all ? Math.round(cache/all*100) : 0, tout: fmtTok(tout), cost});
+  $('costline').dataset.tip = tipBox(t('costTip'),
+    [['fresh', fmtTok(fresh)], ['cache write', fmtTok(cw)], ['cache read', fmtTok(cr)],
+     ['out', fmtTok(tout)], ...(usd ? [['≈', fmtUsd(usd)]] : [])],
+    {note: t('costTipNote')});
+}
+function renderTicker(ev){
+  const el = $('ticker');
+  el.innerHTML = `${new Date(ev.ts).toTimeString().slice(0,8)} · ${esc(ev.agent)} · `
+    + `<span class="op" style="color:${opCol(ev.op)}">${(OP_LABEL[ev.op]||ev.op).toLowerCase()}</span> · ${esc(ev.file)}`;
+  el.classList.remove('blink'); void el.offsetWidth; el.classList.add('blink');
+}
+function renderNotes(){
+  const out = [];
+  const files = [...S.files.entries()];
+  const rr = files.filter(([,s])=>s.reads>=4).sort((a,b)=>b[1].reads-a[1].reads);
+  for (const [p,s] of rr.slice(0,2)){
+    out.push({lv: s.reads>=7?'bad':'warn',
+      t: t('nRereadT', {f: esc(p.split('/').pop()), n: s.reads}),
+      why: t('nRereadW')});
+  }
+  const failing = files.filter(([,s])=>s.errs>=3).sort((a,b)=>b[1].errs-a[1].errs);
+  for (const [p,s] of failing.slice(0,1))
+    out.push({lv:'bad', t: t('nErrT',{f:esc(p.split('/').pop()), n:s.errs}), why: t('nErrW')});
+  const totalErrs = [...S.agents.values()].reduce((a,x)=>a+x.errs,0);
+  if (totalErrs >= 8 && !failing.length)
+    out.push({lv:'warn', t: t('nErrAgentT',{n:totalErrs}), why: t('nErrAgentW')});
+  const waste = files.filter(([p])=>isWastePath(p));
+  const wCnt = waste.reduce((a,[,s])=>a+s.total,0);
+  if (wCnt>=3) out.push({lv:'bad', t: t('nJunkT',{n:wCnt}), why: t('nJunkW')});
+  const dup = files.filter(([,s])=>s.agents.size>=2 && s.total>=4);
+  if (dup.length>=2) out.push({lv:'warn', t: t('nDupT',{n:dup.length}), why: t('nDupW')});
+  if (files.some(([p])=>p.split('/').pop()==='CLAUDE.md')) out.push({lv:'good', t: t('nClaudeT'), why: t('nClaudeW')});
+  if (S.opCount.edit>0 && S.opCount.bash>0) out.push({lv:'good', t: t('nLoopT'), why: t('nLoopW')});
+  $('notes').innerHTML = out.slice(0,4).map(n=>`
+    <div class="note ${n.lv}"><span class="ic">${n.lv==='good'?'✓':n.lv==='warn'?'!':'✗'}</span>
+    <span>${n.t} <span class="why">— ${n.why}</span></span></div>`).join('');
+}
+function renderNoFiles(){
+  const el = $('noFiles');
+  const ops = Object.values(S.opCount).reduce((a,b)=>a+b,0);
+  if (S.files.size === 0 && ops > 0){ el.innerHTML = t('noFilesYet', {n: ops}); el.hidden = false; }
+  else el.hidden = true;
+}
+function renderAll(){
+  ROOT = computeRoot([...S.files.keys()].map(dirOf));
+  const rn = $('rootNote');
+  if (ROOT){ rn.innerHTML = t('underRoot', {p: esc(ROOT)+'/'}); rn.hidden = false; }
+  else rn.hidden = true;
+  renderAgents(); renderStats(); renderRows(); renderNotes(); updateFog(); drawTM(); markTMNow(); renderNoFiles();
+}
+
+/* ══ foldable sections ══ */
+function initFolds(){
+  document.querySelectorAll('section').forEach((sec, i)=>{
+    const h = sec.querySelector('h2');
+    if (!h) return;
+    const key = 'cs-sec-' + (sec.dataset.key || i);
+    let folded = false;
+    try{ folded = localStorage.getItem(key) === '1'; }catch(e){}
+    sec.classList.toggle('folded', folded);
+    h.tabIndex = 0;
+    h.dataset.tip = tipBox(h.textContent.replace(/^[▾▸]\s*/,''), [], {note: t('secFold')});
+    const toggle = ()=>{
+      const now = !sec.classList.contains('folded');
+      sec.classList.toggle('folded', now);
+      try{ localStorage.setItem(key, now?'1':'0'); }catch(e){}
+      if (!now && S && S.ready) renderAll();   // canvases need a redraw once visible again
+    };
+    h.addEventListener('click', toggle);
+    h.addEventListener('keydown', e=>{ if (e.key==='Enter'||e.key===' '){ e.preventDefault(); toggle(); } });
+  });
+}
+
+/* ══ language ══ */
+function applyLang(){
+  document.documentElement.lang = LANG;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{ el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el=>{ el.innerHTML = t(el.dataset.i18nHtml); });
+  renderLangs();
+  $('btnPause').textContent = running ? t('pause') : t('resume');
+  if (S && S.ready){ renderSessLinks(); renderAll(); if (S.lastEv) renderTicker(S.lastEv); }
+  else renderSessLinks();
+}
+function renderLangs(){
+  const box = $('langs');
+  box.innerHTML = '';
+  for (const code of LANGS){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = code === LANG ? 'on' : '';
+    b.textContent = I18N[code]._short || code.toUpperCase();
+    b.title = I18N[code]._name;
+    b.setAttribute('aria-pressed', String(code === LANG));
+    b.addEventListener('click', ()=>{
+      if (code === LANG) return;
+      LANG = code;
+      try{ localStorage.setItem('cs-lang', LANG); }catch(e){}
+      applyLang();
+    });
+    box.appendChild(b);
+  }
+}
+$('btnPause').addEventListener('click', function(){
+  running = !running;
+  this.textContent = running ? t('pause') : t('resume');
+  this.classList.toggle('on', !running);
+  this.setAttribute('aria-pressed', String(!running));
+  if (running && liveBuf.length){
+    for (const ev of liveBuf) applyEvent(ev, false);
+    liveBuf = [];
+    renderAll();
+    if (S.lastEv) renderTicker(S.lastEv);
+  }
+});
+
+/* periodic refresh: heat fade, delta expiry, session list */
+setInterval(()=>{
+  if (!S || !S.ready || !running) return;
+  const now = Date.now();
+  for (const s of S.files.values())
+    if (s.delta>0 && now-s.deltaT > 15000) s.delta = 0;
+  renderAll();
+}, 3000);
+setInterval(()=>{                       // let the live marker fade on its own when idle
+  if (!S || !S.now || Date.now()-S.now.ts <= NOW_MS) return;
+  S.now = null;
+  document.querySelectorAll('.mc.now').forEach(e=>e.classList.remove('now'));
+  $('tmNow').hidden = true;
+}, 1000);
+setInterval(loadSessions, 15000);
+addEventListener('resize', ()=>{ if (S && S.ready) renderAll(); });
+
+/* ══ boot ══ */
+if (document.fonts && document.fonts.ready)
+  document.fonts.ready.then(()=>{ if (S && S.ready) renderAll(); });
+applyLang();
+initFolds();
+loadMeta();
+loadUniverse().then(loadSessions);
+})();
+</script>
+</body>
+</html>
