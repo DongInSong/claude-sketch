@@ -65,10 +65,10 @@ options
       --strict-port     fail instead of trying the next port
   -d, --detach          run in the background and hand the terminal back
       --host <addr>     address to bind                 (default: 127.0.0.1)
-      --open            open a tab even if one is already up
+      --open            open a tab without checking for one first
       --no-open         don't open the browser
-                        (by default a tab opens unless one was opened for this
-                         port in the last ten minutes — it reloads itself)
+                        (by default: if a tab is already open on this port it is
+                         left alone — it notices the restart and reloads itself)
   -v, --version         print the version
   -h, --help            print this
 
@@ -116,6 +116,12 @@ if (opt.detach && !process.env.CLAUDE_SKETCH_CHILD) {
 const project = new Project(opt.project);
 const server = createServer(project);
 
+// long enough for an open tab's event stream to retry (browsers wait ~3s),
+// short enough not to sit there when there is no tab
+const TAB_WAIT_MS = 5000;
+let knocked = false;
+server.on('request', () => { knocked = true; });
+
 // A busy port is the most common first-run stumble, so walk to the next free one
 // unless the caller pinned it with --strict-port.
 let attempt = 0;
@@ -138,14 +144,23 @@ server.listen(opt.port, opt.host, () => {
   console.log(`  open        ${url}`);
   if (opt.host !== '127.0.0.1' && opt.host !== 'localhost')
     console.log(`  ⚠ bound to ${opt.host} — anyone on this network can read these transcripts`);
-  if (opt.open && !opt.openExplicit && openedRecently(opt.port)) {
-    // the tab from last time is still the one you want — it notices the server
-    // came back and reloads itself
-    console.log(`  (a tab is already open on this port — it will pick this up by itself)`);
-  } else if (opt.open) {
-    openBrowser(url);
-    markOpened(opt.port);
-  }
+  const show = () => { openBrowser(url); markOpened(opt.port); };
+  if (!opt.open) return;
+  if (opt.openExplicit || !openedRecently(opt.port)) return show();
+
+  // We opened a tab for this port not long ago. It may still be there, holding
+  // your scroll position and waiting to reconnect — or you may have closed it.
+  // Listen instead of assuming: an open tab knocks within a few seconds.
+  console.log(`  …checking whether that tab is still open`);
+  setTimeout(() => {
+    if (knocked) {
+      console.log(`  it is — leaving it to reload itself`);
+      markOpened(opt.port);
+    } else {
+      console.log(`  it isn't — opening a new one`);
+      show();
+    }
+  }, TAB_WAIT_MS);
 });
 
 process.on('SIGINT', () => { console.log('\n✳ bye'); process.exit(0); });
