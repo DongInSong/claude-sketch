@@ -960,10 +960,22 @@ function openPicker(){
   picker.style.left = Math.max(6, Math.min(innerWidth - w - 8, r.left - 6)) + 'px';
   picker.style.top = (r.bottom + 8) + 'px';
 }
+function rememberProject(root){
+  try{ localStorage.setItem('cs-project', root); }catch(e){}
+  const u = new URL(location.href);
+  u.searchParams.set('project', root);
+  history.replaceState(null, '', u);
+}
+function savedProject(){
+  const fromUrl = new URLSearchParams(location.search).get('project');
+  if (fromUrl) return fromUrl;
+  try{ return localStorage.getItem('cs-project'); }catch(e){ return null; }
+}
 async function switchProject(root){
   if (root === PROJECT) return;
   if (ES) ES.close();
   PROJECT = root;
+  rememberProject(root);
   S = null; SESSIONS = []; rowEls.clear();
   $('projPick').innerHTML = esc(root) + '<span class="caret">▾</span>';
   $('ticker').textContent = t('connecting');
@@ -977,12 +989,16 @@ async function loadMeta(){
     const m = await (await fetch('/api/meta')).json();
     PROJECT = m.project;
     PRICING = m.pricing; EDITOR = m.editor || 'system';
-    $('projPick').innerHTML = esc(m.project) + '<span class="caret">▾</span>';
     $('projPick').addEventListener('click', ()=> pickerOpen ? closePicker() : openPicker());
     try{
       const r = await (await fetch('/api/projects')).json();
       PROJECTS = r.projects || [];
     }catch(e){ PROJECTS = []; }
+    // a reload should stay on the folder you picked, not snap back to --project
+    const want = savedProject();
+    if (want && want !== PROJECT && PROJECTS.some(p => p.root === want)) PROJECT = want;
+    if (PROJECT !== m.project) rememberProject(PROJECT);
+    $('projPick').innerHTML = esc(PROJECT) + '<span class="caret">▾</span>';
   }catch(e){ $('projPick').textContent = '?'; }
 }
 async function loadUniverse(){
@@ -1930,8 +1946,11 @@ if (document.fonts && document.fonts.ready)
   document.fonts.ready.then(()=>{ if (S && S.ready) renderAll(); });
 applyLang();
 initFolds();
-loadMeta();
-loadUniverse().then(loadSessions);
+(async () => {
+  await loadMeta();          // resolves which folder we're on before anything asks
+  await loadUniverse();
+  await loadSessions();
+})();
 })();
 </script>
 </body>
