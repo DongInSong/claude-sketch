@@ -5,7 +5,7 @@
 > 🕵️ Claude 刚刚第六次读了 `fusion.py` —— 顺便去 `vendor/` 逛了一圈。
 > 你完全不知道。现在你知道了。
 
-用蜡笔实时画出 **Claude Code** 正在动的文件。数据不出本机。🖍️
+用蜡笔实时画出 **Claude Code** 正在动的文件。🖍️
 
 ```bash
 npx claude-sketch
