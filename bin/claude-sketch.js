@@ -96,7 +96,10 @@ if (opt.detach && !process.env.CLAUDE_SKETCH_CHILD) {
       && a !== '--port' && all[i - 1] !== '--port');
   const child = spawn(process.execPath,
     [fileURLToPath(import.meta.url), ...passthrough, '--port', String(port), '--strict-port'],
-    { detached: true, stdio: ['ignore', log, log], env: { ...process.env, CLAUDE_SKETCH_CHILD: '1' } });
+    // windowsHide: a detached console app would otherwise open a console window
+    // of its own and leave it sitting there
+    { detached: true, windowsHide: true, stdio: ['ignore', log, log],
+      env: { ...process.env, CLAUDE_SKETCH_CHILD: '1' } });
   child.unref();
   console.log(`✳ claude-sketch v${PKG.version} — running in the background`);
   console.log(`  open  http://localhost:${port}`);
@@ -134,7 +137,13 @@ server.listen(opt.port, opt.host, () => {
   if (opt.open) {
     const cmd = process.platform === 'darwin' ? 'open'
       : process.platform === 'win32' ? 'explorer.exe' : 'xdg-open';
-    try { spawn(cmd, [url], { stdio: 'ignore', detached: true }).unref(); } catch { /* the URL is printed anyway */ }
+    // a missing xdg-open surfaces as an async 'error' event, which would
+    // otherwise be an unhandled throw — the URL is printed above anyway
+    try {
+      const b = spawn(cmd, [url], { stdio: 'ignore', detached: true });
+      b.on('error', () => {});
+      b.unref();
+    } catch { /* the URL is printed anyway */ }
   }
 });
 
