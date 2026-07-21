@@ -70,6 +70,32 @@
 
   .sessline{margin:20px 0 0;font-size:17px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
   .sessline b{color:var(--ink);font-size:15px}
+  /* the watched folder: a pinned scrap you can swap */
+  .folder{position:relative;color:var(--ink);font-size:15px;padding:2px 10px;white-space:nowrap}
+  .folder::before{content:"";position:absolute;inset:-2px -4px;
+    border:2px solid var(--ink3);
+    border-radius:235px 18px 245px 20px / 20px 245px 18px 235px;
+    filter:url(#squiggle);opacity:.55}
+  .folder:hover{color:var(--accent)}
+  .folder:hover::before{border-color:var(--accent);opacity:.9}
+  .folder .caret{color:var(--ink3);font-size:12px;margin-left:5px}
+  .picker{position:fixed;z-index:30;display:none;max-width:min(520px, 94vw);max-height:70vh;
+    overflow-y:auto;background:var(--paper);border:2.5px solid var(--ink2);
+    border-radius:14px 18px 15px 19px / 18px 15px 19px 14px;
+    padding:10px 8px 8px;box-shadow:3px 4px 0 color-mix(in srgb, var(--ink) 14%, transparent)}
+  .picker.show{display:block}
+  .picker .ptitle{font-size:14px;color:var(--ink3);padding:0 8px 6px}
+  .picker button{display:block;width:100%;text-align:left;padding:5px 9px;border-radius:9px;
+    font-size:15px;line-height:1.35;color:var(--ink)}
+  .picker button:hover{background:color-mix(in srgb, var(--ink) 6%, transparent)}
+  .picker button.on{position:relative;color:var(--accent);font-weight:700}
+  .picker button.on::before{content:"";position:absolute;inset:1px 2px;
+    border:2px solid var(--accent);
+    border-radius:225px 20px 255px 20px / 20px 255px 20px 225px;
+    filter:url(#squiggle)}
+  .picker .meta{display:block;font-size:12.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
+  .picker button.gone{opacity:.5}
+  .picker button.gone .meta::after{content:" ✕";color:var(--bad)}
   .slink{color:var(--ink2);position:relative;padding:1px 8px;white-space:nowrap;font-size:17px}
   .slink:hover{color:var(--ink)}
   .slink.on{color:var(--ink);font-weight:700}
@@ -314,7 +340,7 @@
   </header>
 
   <div class="sessline">
-    <span data-i18n-html="watching"></span><b class="mono" id="projPath">…</b>
+    <span data-i18n-html="watching"></span><button type="button" id="projPick" class="folder">…</button>
     <span id="sessLinks"></span>
   </div>
 
@@ -388,6 +414,8 @@ const I18N = {
     dirHits: '· {n} hits',
     quietLine: '… +{n} quiet files ({h} hits) — {names}',
     quietBandTitle:'untouched folders',
+    pickTitle:'folders Claude Code has worked in', pickMeta:'{n} sessions · {a}',
+    pickGone:'folder no longer on disk',
     moreSess:'+{n} more', lessSess:'show less', earlierTasks:'+{n} earlier tasks',
     agoM:'{n}m ago', agoH:'{n}h ago', agoD:'{n}d ago',
     liveNow:'live', doneAt:'done · {a}',
@@ -448,6 +476,8 @@ const I18N = {
     dirHits: '· {n}회',
     quietLine: '… 조용한 파일 {n}개 ({h}회) — {names}',
     quietBandTitle:'미접촉 폴더',
+    pickTitle:'Claude Code가 작업한 적 있는 폴더', pickMeta:'세션 {n}개 · {a}',
+    pickGone:'폴더가 지금은 없음',
     moreSess:'+{n}개 더', lessSess:'접기', earlierTasks:'이전 task {n}개 더',
     agoM:'{n}분 전', agoH:'{n}시간 전', agoD:'{n}일 전',
     liveNow:'진행 중', doneAt:'완료 · {a}',
@@ -508,6 +538,8 @@ const I18N = {
     dirHits: '· {n} 回',
     quietLine: '… 静かなファイル {n} 件（{h} 回）— {names}',
     quietBandTitle:'未接触フォルダ',
+    pickTitle:'Claude Code が作業したフォルダ', pickMeta:'セッション {n} 件 · {a}',
+    pickGone:'フォルダは今はありません',
     moreSess:'+{n} 件', lessSess:'たたむ', earlierTasks:'以前の task {n} 件',
     agoM:'{n}分前', agoH:'{n}時間前', agoD:'{n}日前',
     liveNow:'実行中', doneAt:'完了 · {a}',
@@ -568,6 +600,8 @@ const I18N = {
     dirHits: '· {n} 次',
     quietLine: '… 另有 {n} 个安静文件（{h} 次）— {names}',
     quietBandTitle:'未接触的文件夹',
+    pickTitle:'Claude Code 干过活的文件夹', pickMeta:'{n} 个会话 · {a}',
+    pickGone:'文件夹已不在',
     moreSess:'+{n} 个', lessSess:'收起', earlierTasks:'更早的 task {n} 个',
     agoM:'{n} 分钟前', agoH:'{n} 小时前', agoD:'{n} 天前',
     liveNow:'进行中', doneAt:'已完成 · {a}',
@@ -727,6 +761,13 @@ function dirLabel(d, keep){ return shortDir(stripRoot(d), keep); }
 /* ══ state ══ */
 let SESSIONS = [];
 let PRICING = null, EDITOR = 'system';
+let PROJECT = null, PROJECTS = [];
+const q = (extra) => {
+  const p = new URLSearchParams(extra || {});
+  if (PROJECT) p.set('project', PROJECT);
+  const qs = p.toString();
+  return qs ? '?' + qs : '';
+};
 let UNIVERSE = null;      // {tree:[[dir,[names]]...], total, set:Set(paths)}
 let S = null;             // current session state
 let ES = null;            // EventSource
@@ -872,7 +913,7 @@ function openTarget(p, ev){
   askYes.focus();
 }
 function doOpen(p){
-  fetch('/api/open', {method:'POST', headers:{'content-type':'application/json'},
+  fetch('/api/open' + q(), {method:'POST', headers:{'content-type':'application/json'},
     body: JSON.stringify({path: p})})
     .then(r=>r.json())
     .then(r=>{ flash(r.ok ? t('openDone', {f: p.split('/').pop()}) : t('openFail', {e: r.error||'?'})); })
@@ -884,17 +925,68 @@ function flash(msg){
   el.classList.remove('blink'); void el.offsetWidth; el.classList.add('blink');
 }
 
+/* ══ folder picker: every folder Claude Code has worked in ══ */
+const picker = document.createElement('div');
+picker.className = 'picker';
+document.body.appendChild(picker);
+let pickerOpen = false;
+
+function closePicker(){ picker.classList.remove('show'); pickerOpen = false; }
+addEventListener('mousedown', e => {
+  if (pickerOpen && !picker.contains(e.target) && e.target !== $('projPick')) closePicker();
+}, true);
+addEventListener('keydown', e => { if (pickerOpen && e.key === 'Escape') closePicker(); });
+
+function renderPicker(){
+  picker.innerHTML = `<div class="ptitle">${t('pickTitle')}</div>`;
+  for (const p of PROJECTS){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = (p.root === PROJECT ? 'on ' : '') + (p.exists ? '' : 'gone');
+    b.innerHTML = `${esc(p.root)}<span class="meta">${
+      t('pickMeta', {n: p.sessions, a: fmtAgo(Date.now() - p.mtimeMs)})}</span>`;
+    if (!p.exists) b.title = t('pickGone');
+    b.addEventListener('click', ()=>{ closePicker(); switchProject(p.root); });
+    picker.appendChild(b);
+  }
+}
+function openPicker(){
+  renderPicker();
+  picker.classList.add('show');
+  pickerOpen = true;
+  const r = $('projPick').getBoundingClientRect();
+  const w = picker.offsetWidth;
+  picker.style.left = Math.max(6, Math.min(innerWidth - w - 8, r.left - 6)) + 'px';
+  picker.style.top = (r.bottom + 8) + 'px';
+}
+async function switchProject(root){
+  if (root === PROJECT) return;
+  if (ES) ES.close();
+  PROJECT = root;
+  S = null; SESSIONS = []; rowEls.clear();
+  $('projPick').innerHTML = esc(root) + '<span class="caret">▾</span>';
+  $('ticker').textContent = t('connecting');
+  await loadUniverse();
+  await loadSessions();
+}
+
 /* ══ data loading ══ */
 async function loadMeta(){
   try{
     const m = await (await fetch('/api/meta')).json();
-    $('projPath').textContent = m.project;
+    PROJECT = m.project;
     PRICING = m.pricing; EDITOR = m.editor || 'system';
-  }catch(e){ $('projPath').textContent = '?'; }
+    $('projPick').innerHTML = esc(m.project) + '<span class="caret">▾</span>';
+    $('projPick').addEventListener('click', ()=> pickerOpen ? closePicker() : openPicker());
+    try{
+      const r = await (await fetch('/api/projects')).json();
+      PROJECTS = r.projects || [];
+    }catch(e){ PROJECTS = []; }
+  }catch(e){ $('projPick').textContent = '?'; }
 }
 async function loadUniverse(){
   try{
-    const u = await (await fetch('/api/universe')).json();
+    const u = await (await fetch('/api/universe' + q())).json();
     const dirs = new Map();
     for (const p of u.files){
       const d = dirOf(p);
@@ -910,7 +1002,7 @@ async function loadUniverse(){
 }
 async function loadSessions(){
   try{
-    const r = await (await fetch('/api/sessions')).json();
+    const r = await (await fetch('/api/sessions' + q())).json();
     SESSIONS = r.sessions || [];
   }catch(e){ SESSIONS = []; }
   renderSessLinks();
@@ -926,7 +1018,7 @@ function selectSession(id){
   rowEls.clear();
   $('ticker').textContent = t('connecting');
   renderSessLinks();
-  ES = new EventSource('/events?session=' + encodeURIComponent(id));
+  ES = new EventSource('/events' + q({session: id}));
   ES.onmessage = (m) => {
     let d; try{ d = JSON.parse(m.data); }catch(e){ return; }
     if (d.t === 'backlog'){

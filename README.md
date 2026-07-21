@@ -21,6 +21,7 @@ npx claude-sketch
 - 👣 **footprints** — every file in the repo; filled = stepped on, dashed = walked past, `⋯16⋯` = never went near. Coverage counted against `git ls-files`.
 - 🎯 **attention share** — treemap where **area = tool calls**. One file eating a third of the frame *is* the warning.
 - 🔥 **file heat** — 5m / 1h / whole session. Read-read-edit-run… or read-read-read-read. 😬
+- 📂 **folder picker** — the header lists every folder Claude Code has ever worked in (recovered from the transcripts themselves); switch without restarting.
 - 🧠 **agents** — `main ─task▶ subagents`, each with model, brief, status, duration. Click one to filter everything to it.
 - 📝 **margin notes** — "read 6×, probably already in context", "poking `vendor/` 9×", "edit → run loop 👍".
 - ✂️ **deletions & diffs** — `rm` inside a Bash call shows up struck through; edits carry `+12 −3`.
