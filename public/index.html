@@ -1038,6 +1038,13 @@ async function api(path){
     }
     throw new Error('stale token');
   }
+  // A status is the server answering. Only a fetch that never landed at all
+  // means it stopped — the difference decides what the page tells you.
+  if (!res.ok){
+    const err = new Error('http ' + res.status);
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 async function loadMeta(){
@@ -1079,9 +1086,13 @@ async function loadSessions(){
     SESSIONS = r.sessions || [];
     OFFLINE = false;
   }catch(e){
+    // A 404 is the server telling us it does not know this folder — the saved
+    // ?project= has gone stale. That is not the backend being gone, and saying
+    // so sent people looking for a process that was running the whole time.
+    if (e.status){ SESSIONS = []; OFFLINE = false; }
     // the sessions did not go anywhere, the server did — keep them on screen
     // and say what actually happened
-    OFFLINE = true;
+    else OFFLINE = true;
   }
   renderSessLinks();
   if (!S && SESSIONS.length) selectSession((SESSIONS.find(s=>s.active) || SESSIONS[0]).id);
