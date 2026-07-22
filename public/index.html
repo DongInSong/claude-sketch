@@ -1248,7 +1248,7 @@ function fileTip(p, fs, openable){
   if (fs.plus) rows.push([t('lblAdded'), '+'+fs.plus]);
   if (fs.minus) rows.push([t('lblRemoved'), '−'+fs.minus]);
   if (fs.tokens) rows.push([t('lblTok'), '~'+fmtTok(fs.tokens)]);
-  if (fs.agents.size>1) rows.push([t('lblAgents'), [...fs.agents].join(', ')]);
+  if (fs.agents.size>1) rows.push([t('lblAgents'), [...fs.agents].map(showAgent).join(', ')]);
   const opt = {};
   if (fs.gone){ opt.flag = t('flagGone'); opt.bad = true; }
   else if (fs.reads>=4){ opt.flag = t('flagReread',{n:fs.reads}); opt.bad = fs.reads>=7; }
@@ -2441,15 +2441,49 @@ function renderSessLinks(){
   }
 }
 let tasksFolded = (()=>{ try{ return localStorage.getItem('cs-fold')==='1'; }catch(e){ return false; } })();
+// When the Task call that spawned an agent can be found, that is its start;
+// otherwise the first thing it did, which is close and is all there is —
+// measured across every session on this machine, 69% of subagents record no link
+// back to their Task call at all. Infinity means neither is known, which is a
+// subagent that has only just appeared.
+const startOf = ([nm, a]) => (a.task && a.task.start) || a.firstTs || Infinity;
+
+// A label is the agent's identity: every call and token it makes is counted
+// under that string, so two agents can never share one and it can never change.
+// What it is *called on screen* is another matter. The suffix it carries is the
+// count of transcripts seen when its file was first opened — the order the
+// directory happened to list them in — so "implementer #22" means the
+// twenty-second file, not the twenty-second implementer, and across a real
+// session those numbers rose with time in only 8 of 21 steps.
+//
+// Numbered here instead, per role and in the order they actually ran. A role
+// with only one agent keeps its plain name.
+let AGENT_NAME = new Map();
+const roleOf = (nm) => nm.replace(/ #\d+$/, '');
+function nameAgents(){
+  const byRole = new Map();
+  for (const entry of S.agents){
+    if (entry[0] === 'main') continue;
+    const r = roleOf(entry[0]);
+    if (!byRole.has(r)) byRole.set(r, []);
+    byRole.get(r).push(entry);
+  }
+  AGENT_NAME = new Map();
+  for (const [r, list] of byRole){
+    if (list.length === 1){ AGENT_NAME.set(list[0][0], r); continue; }
+    list.sort((x, y) => {
+      const d = startOf(x) - startOf(y);
+      return (Number.isNaN(d) ? 0 : d) || x[0].localeCompare(y[0]);
+    });
+    list.forEach((e, i) => AGENT_NAME.set(e[0], r + ' ' + (i + 1)));
+  }
+}
+const showAgent = (nm) => AGENT_NAME.get(nm) || nm;
+
 function renderAgents(){
   const box = $('agents');
   box.innerHTML = '';
-  // When the Task call that spawned an agent can be found, that is its start;
-  // otherwise the first thing it did, which is close and is all there is —
-  // measured across every session on this machine, 69% of subagents record no
-  // link back to their Task call at all. Infinity means neither is known, which
-  // is a subagent that has only just appeared.
-  const startOf = ([nm, a]) => (a.task && a.task.start) || a.firstTs || Infinity;
+  nameAgents();
   // Newest first: the list already keeps the most recent twelve and drops the
   // rest, so reading it oldest-first put the ones it had chosen to keep at the
   // bottom. A subagent that has not done anything yet is the newest of all.
@@ -2469,7 +2503,7 @@ function renderAgents(){
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'al agl' + (on?' on':'') + (off?' off':'');
-    b.dataset.tip = tipBox(nm==='main'? 'main' : nm,
+    b.dataset.tip = tipBox(nm==='main'? 'main' : showAgent(nm),
       [[t('lblModel'), prettyModel(a.model)||'—'], [t('lblCalls'), String(a.count)],
        [t('lblIn'), fmtTok(a.tin)], [t('lblOut'), fmtTok(a.tout)],
        ...(a.errs ? [[t('lblFailed'), String(a.errs)]] : []),
@@ -2477,7 +2511,7 @@ function renderAgents(){
       {flag: on ? t('flagFilterOn') : t('flagFilterOff')});
     b.innerHTML = (nm==='main'
         ? `<span class="nw"><span class="dot">●</span> <b>main</b>`
-        : `<span class="nw"><span class="sub">└╌ task ▶</span> <span class="dot">○</span> <b>${esc(nm)}</b>`)
+        : `<span class="nw"><span class="sub">└╌ task ▶</span> <span class="dot">○</span> <b>${esc(showAgent(nm))}</b>`)
       + (a.model ? ` — ${modelBadge(a.model)}` : '')
       + `</span> <span class="tk">${t('agentStats',{count:a.count, tin:fmtTok(a.tin), tout:fmtTok(a.tout)})}</span>`;
     b.addEventListener('click', ()=> setFilter(nm));
