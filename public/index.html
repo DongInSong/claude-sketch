@@ -229,7 +229,7 @@
   .hint{font-size:14px;color:var(--ink3);margin:0 0 12px}
   .hint u{text-decoration:underline wavy 2px;text-underline-offset:3px}
   .hint .ur{color:var(--op-read)} .hint .ug{color:var(--op-grep)}
-  .hint .ue{color:var(--op-edit)} .hint .ub{color:var(--op-bash)}
+  .hint .ue{color:var(--op-edit)}
   .hint b{color:var(--ink)}
   .rootnote{font-size:14px;color:var(--ink3);margin:-8px 0 10px}
   .rootnote b{color:var(--ink2);font-weight:700}
@@ -457,7 +457,7 @@ const I18N = {
     tmTitle: 'attention share',
     tmHint: 'area = hits · label = touched/total',
     heatTitle: 'file heat',
-    heatHint: '<u class="ur">read</u> <u class="ug">search</u> <u class="ue">edit</u> <u class="ub">run</u> · ✎ edited · ×n re-reads',
+    heatHint: '<u class="ur">read</u> <u class="ug">search</u> <u class="ue">edit</u> · ✎ edited · ×n re-reads',
     rulerR: 'now →', rangeAll:'all', spanStart:'← {a}', spanNone:'← session start',
     dirHits: '· {n} hits',
     quietLine: '… +{n} quiet files ({h} hits) — {names}',
@@ -523,7 +523,7 @@ const I18N = {
     tmTitle: '손때',
     tmHint: '면적 = 히트 · 라벨 = 접촉/전체',
     heatTitle: '파일별 타임라인',
-    heatHint: '<u class="ur">읽기</u> <u class="ug">검색</u> <u class="ue">수정</u> <u class="ub">실행</u> · ✎ 수정됨 · ×n 재읽기',
+    heatHint: '<u class="ur">읽기</u> <u class="ug">검색</u> <u class="ue">수정</u> · ✎ 수정됨 · ×n 재읽기',
     rulerR: '지금 →', rangeAll:'전체', spanStart:'← {a}', spanNone:'← 세션 시작',
     dirHits: '· {n}회',
     quietLine: '… 조용한 파일 {n}개 ({h}회) — {names}',
@@ -589,7 +589,7 @@ const I18N = {
     tmTitle: '手数の内訳',
     tmHint: '面積 = ヒット数 · ラベル = 接触/全体',
     heatTitle: 'ファイル熱量',
-    heatHint: '<u class="ur">読む</u> <u class="ug">検索</u> <u class="ue">編集</u> <u class="ub">実行</u> · ✎ 編集済み · ×n 再読込',
+    heatHint: '<u class="ur">読む</u> <u class="ug">検索</u> <u class="ue">編集</u> · ✎ 編集済み · ×n 再読込',
     rulerR: '今 →', rangeAll:'全体', spanStart:'← {a}', spanNone:'← セッション開始',
     dirHits: '· {n} 回',
     quietLine: '… 静かなファイル {n} 件（{h} 回）— {names}',
@@ -655,7 +655,7 @@ const I18N = {
     tmTitle: '注意力分布',
     tmHint: '面积 = 命中次数 · 标签 = 接触/总数',
     heatTitle: '文件热度',
-    heatHint: '<u class="ur">读取</u> <u class="ug">搜索</u> <u class="ue">编辑</u> <u class="ub">运行</u> · ✎ 已编辑 · ×n 重读',
+    heatHint: '<u class="ur">读取</u> <u class="ug">搜索</u> <u class="ue">编辑</u> · ✎ 已编辑 · ×n 重读',
     rulerR: '现在 →', rangeAll:'全部', spanStart:'← {a}', spanNone:'← 会话开始',
     dirHits: '· {n} 次',
     quietLine: '… 另有 {n} 个安静文件（{h} 次）— {names}',
