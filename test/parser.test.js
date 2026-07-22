@@ -57,6 +57,40 @@ test('usage is summed per agent, and a restated message id does not double-count
   assert.equal(emit().find(e => e.t === 'usage'), undefined);   // unchanged: nothing to say
 });
 
+test('usage: a restated message replaces its own tokens, and agents keep separate books', () => {
+  const p = new SessionParser('/r');
+  const say = (id, agent, n) => p.parseLine({ type: 'assistant',
+    message: { id, model: 'opus', usage: { input_tokens: n, output_tokens: n } } },
+    agent).find(e => e.t === 'usage');
+
+  say('m1', 'main', 10);
+  const grown = say('m1', 'main', 30);          // streamed again, larger
+  assert.deepEqual([grown.tin, grown.tout], [30, 30], 'a rewrite replaces, it does not add');
+
+  const both = say('m2', 'main', 5);            // a new message does add
+  assert.deepEqual([both.tin, both.tout], [35, 35]);
+
+  const sub = say('m3', 'Explore', 7);
+  assert.deepEqual([sub.agent, sub.tin, sub.tout], ['Explore', 7, 7]);
+  assert.deepEqual(p.totals.get('main'), { tin: 35, tout: 35 }, 'the subagent did not touch main');
+});
+
+// The agent's total used to be re-summed from every message seen so far, which
+// is quadratic in the length of a session — and it is paid on the /events
+// connect that replays the backlog. Measured here: 20k messages cost 460ms that
+// way and 18ms this way; 100k is 66ms linear and would be somewhere near 11s
+// quadratic. The bound sits between the two with room for a slow CI runner.
+test('usage: the running total does not re-read the whole session per message', () => {
+  const p = new SessionParser('/r');
+  const t0 = Date.now();
+  for (let i = 0; i < 100000; i++)
+    p.parseLine({ type: 'assistant', message: { id: 'm' + i, model: 'opus',
+      usage: { input_tokens: 1, cache_read_input_tokens: 2, output_tokens: 3 } } }, 'main');
+  const ms = Date.now() - t0;
+  assert.deepEqual(p.totals.get('main'), { tin: 300000, tout: 300000 });
+  assert.ok(ms < 3000, `100k messages took ${ms}ms — per-message cost is growing with the session`);
+});
+
 test('deletedPaths(): reads rm out of a Bash command, skips flags and globs', () => {
   assert.deepEqual(deletedPaths('rm -rf build/old.js'), ['build/old.js']);
   assert.deepEqual(deletedPaths('echo hi && rm a.txt b.txt'), ['a.txt', 'b.txt']);
