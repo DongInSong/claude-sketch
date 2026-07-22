@@ -123,6 +123,8 @@ test('a result reports how many lines came back, whatever shape it arrives in', 
     'main').find(e => e.t === 'res');
 
   assert.equal(res('one\ntwo\nthree').rows, 3, 'a plain string result');
+  assert.equal(res('one\ntwo\nthree\n').rows, 3,
+    'a file ending in a newline has no line after it — 145 lines were reported as 146');
   assert.equal(res([{ type: 'text', text: 'a\nb' }, { type: 'text', text: 'c\nd\ne' }]).rows, 5,
     'a result that arrives as blocks');
   assert.equal(res('').rows, 0);
