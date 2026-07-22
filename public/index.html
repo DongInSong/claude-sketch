@@ -323,6 +323,22 @@
   .mc{width:22px;height:22px;border:1.7px solid var(--ink3);position:relative;flex:none;
     border-radius:6px 9px 7px 10px / 9px 7px 10px 6px}
   .mc.un{border-style:dashed;opacity:.4}
+  /* The legend draws the real cell, shrunk — ■ and ◌ were standing in for a
+     wobbly hand-drawn square and did not look like it, so the key needed a key.
+     scale() rather than a smaller box, so the border weight, the corner radii
+     and the squiggle come along at the same proportions; the box stays 22px, so
+     the margins pull the line back in around it. */
+  .mc.lg{display:inline-block;vertical-align:middle;margin:0 -4px 0 -5px}
+  .mc.lg.seen{border-color:var(--ink2)}
+  /* the one thing the sample does not copy exactly. An unopened cell is meant to
+     recede, and in the map it does that among hundreds of its own kind; alone on
+     a line of small type it recedes into nothing at all. The dashes and the
+     shape are what tell it apart, and those are the map's own. */
+  .mc.un.lg{opacity:.72}
+  .fold.lg{display:inline-block;vertical-align:middle;width:22px;height:0;
+    border-top:1.7px dashed var(--ink3);border-radius:99px;filter:url(#squiggle);
+    opacity:.55;margin:0 2px}
+  #fogLegend .sep{padding:0 3px}
   .mc.warm{outline:2px solid color-mix(in srgb, var(--accent) 45%, transparent);outline-offset:2px}
   .mc.now{outline:none}          /* the scribble on the overlay does the shouting now */
 
@@ -493,7 +509,7 @@
 
   <section data-key="fog">
     <h2 data-i18n="fogTitle"></h2>
-    <p class="hint"><span data-i18n-html="fogHint"></span> <b id="cov">–</b><span id="covNote"></span></p>
+    <p class="hint"><span id="fogLegend"></span> <b id="cov">–</b><span id="covNote"></span></p>
     <p class="rootnote" id="rootNote" hidden></p>
     <div class="livewrap"><div id="fogMap"></div><canvas class="livecv" id="fogNow"></canvas></div>
     <p class="nofiles" id="noFiles" hidden></p>
@@ -549,7 +565,7 @@ const I18N = {
     nErrAgentT:'{n} calls failed in this session', nErrAgentW:'errors burn tokens and buy nothing',
     openAsk:'Open in {e}?', openYes:'open', openNo:'cancel', openDone:'opened {f}',
     fogTitle: 'footprints',
-    fogHint: '■ stepped on · ◌ never opened · ⋯n⋯ folded away ·',
+    legTouched:'stepped on', legUntouched:'never opened', legFolded:'folded away',
     tmTitle: 'attention share',
     tmHint: 'area = hits · label = touched/total',
     heatTitle: 'file heat',
@@ -623,7 +639,7 @@ const I18N = {
     nErrAgentT:'이 세션에서 {n}회 호출 실패', nErrAgentW:'실패는 토큰만 쓰고 얻는 게 없습니다',
     openAsk:'{e}에서 열까요?', openYes:'열기', openNo:'취소', openDone:'{f} 열었습니다',
     fogTitle: '발자국',
-    fogHint: '■ 밟은 파일 · ◌ 아직 안 밟은 파일 · ⋯n⋯ 접힘 ·',
+    legTouched:'밟은 파일', legUntouched:'아직 안 밟은 파일', legFolded:'접힌 구간',
     tmTitle: '손때',
     tmHint: '면적 = 히트 · 라벨 = 접촉/전체',
     heatTitle: '파일별 타임라인',
@@ -697,7 +713,7 @@ const I18N = {
     nErrAgentT:'このセッションで {n} 回の呼び出しが失敗', nErrAgentW:'失敗はトークンだけ消費して何も得られません',
     openAsk:'{e} で開きますか？', openYes:'開く', openNo:'キャンセル', openDone:'{f} を開きました',
     fogTitle: '足あと',
-    fogHint: '■ 踏んだファイル · ◌ 手つかず · ⋯n⋯ 折りたたみ中 ·',
+    legTouched:'踏んだファイル', legUntouched:'手つかず', legFolded:'折りたたみ',
     tmTitle: '手数の内訳',
     tmHint: '面積 = ヒット数 · ラベル = 接触/全体',
     heatTitle: 'ファイル熱量',
@@ -771,7 +787,7 @@ const I18N = {
     nErrAgentT:'本次会话中 {n} 次调用失败', nErrAgentW:'失败只烧 token，什么也换不回来',
     openAsk:'在 {e} 里打开？', openYes:'打开', openNo:'取消', openDone:'已打开 {f}',
     fogTitle: '足迹',
-    fogHint: '■ 去过 · ◌ 没去过 · ⋯n⋯ 已折叠 ·',
+    legTouched:'去过', legUntouched:'没去过', legFolded:'已折叠',
     tmTitle: '注意力分布',
     tmHint: '面积 = 命中次数 · 标签 = 接触/总数',
     heatTitle: '文件热度',
@@ -895,6 +911,7 @@ function applyTheme(shout){
     THEME === 'auto' ? (sysDark.matches ? 'dark' : 'light') : THEME;
   readPal();                       // the custom properties just changed under us
   paintThemeBtn();
+  renderFogLegend();               // its sample is filled from the palette too
   if (shout) sayTheme();
   if (S && S.ready) renderAll();   // every mark on every canvas is the old palette
 }
@@ -1392,6 +1409,11 @@ function fileTip(p, fs, openable){
   if (openable) opt.note = t('openTip');
   return tipBox(p, rows, opt);
 }
+// 크레용 빗금 채움: 스트로크 방향이 파일마다 조금씩 다름. The legend draws its
+// sample with this too, so the key cannot come to look unlike what it is keying.
+const hatch = (a, seed) => `repeating-linear-gradient(${100+(seed%40)}deg,
+  color-mix(in srgb, ${PAL.heat} ${a}%, transparent) 0 2px,
+  color-mix(in srgb, ${PAL.heat} ${Math.round(a*0.5)}%, transparent) 2px 4.5px)`;
 function cellEl(title, seed){
   const el = document.createElement('div');
   el.className = 'mc un';
@@ -1399,6 +1421,40 @@ function cellEl(title, seed){
   el.style.filter = `url(#squig${seed%4})`;      // 셀마다 다른 손그림 패턴
   el.dataset.tip = title;
   return el;
+}
+// The key to the map, drawn with the map's own pieces. Two symbols used to stand
+// in for the cells — ■ for one Claude had opened, ◌ for one it had not — and
+// neither looked like the wobbly pencil square it was describing, so the two
+// were told apart by reading rather than by looking. cellEl is what the map
+// itself calls, so a sample cannot drift from the thing it is a sample of.
+// The third one had drifted already: a folded stretch stopped being a ⋯n⋯ band
+// and became a rule the day before, and the legend still said ⋯n⋯.
+const LEG_SCALE = 0.78;
+function renderFogLegend(){
+  const box = $('fogLegend');
+  if (!box) return;
+  box.innerHTML = '';
+  const shrink = (el) => {
+    el.classList.add('lg');
+    el.style.transform += ` scale(${LEG_SCALE})`;
+    delete el.dataset.tip;                     // the words beside it are the tip
+    return el;
+  };
+  const walked = shrink(cellEl('', 11));
+  walked.classList.remove('un');               // opened: a solid hand-drawn square
+  walked.classList.add('seen');                // border colour from the stylesheet, so it follows the theme
+  walked.style.background = hatch(52, 11);     // a middling amount of attention
+  const never = shrink(cellEl('', 26));        // untouched: dashed and faint, as drawn
+  const folded = document.createElement('i');
+  folded.className = 'fold lg';
+
+  for (const [mark, word] of [[walked, 'legTouched'], [never, 'legUntouched'], [folded, 'legFolded']]){
+    box.append(mark, ' ' + t(word));
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = '·';
+    box.append(' ', sep);
+  }
 }
 function bandEl(n, title){
   const el = document.createElement('span');
@@ -2038,10 +2094,7 @@ function updateFog(){
         const sc = heatScore(fs, nowIx);
         const a = Math.round((0.14 + 0.72*Math.sqrt(sc/maxD))*100);
         el.classList.remove('un');
-        // 크레용 빗금 채움: 스트로크 방향이 파일마다 조금씩 다름
-        el.style.background = `repeating-linear-gradient(${100+(hash(p)%40)}deg,
-          color-mix(in srgb, ${PAL.heat} ${a}%, transparent) 0 2px,
-          color-mix(in srgb, ${PAL.heat} ${Math.round(a*0.5)}%, transparent) 2px 4.5px)`;
+        el.style.background = hatch(a, hash(p));
         el.style.borderColor = fs.reads>=4 ? PAL.del : opCol(domOp(fs.ops));
         if (sc/maxD > 0.5) el.style.boxShadow = `0 0 10px color-mix(in srgb, ${PAL.heat} 55%, transparent)`;
         el.dataset.tip = fileTip(p, fs, true);
@@ -2884,6 +2937,7 @@ function applyLang(){
   document.querySelectorAll('[data-i18n-html]').forEach(el=>{ el.innerHTML = t(el.dataset.i18nHtml); });
   renderLangs();
   paintThemeBtn();                // the mark's tooltip is worded too
+  renderFogLegend();              // and the key beside the footprints
   $('btnPause').textContent = running ? t('pause') : t('resume');
   if (S && S.ready){ renderSessLinks(); renderAll(); if (S.lastEv) renderTicker(S.lastEv); }
   else renderSessLinks();
