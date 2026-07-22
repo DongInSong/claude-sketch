@@ -236,6 +236,159 @@ test('a session is judged on what it did, not on how it opened', (t) => {
   assert.ok(!base.startsWith(home) && !base.startsWith(scratch));
 });
 
+// Finding the repository by asking git meant asking it from inside the folder in
+// question, and a folder deleted since — or belonging to a branch not checked
+// out — cannot be stood in. git failed there, the path was left standing as its
+// own root, and the work done in it dropped out of the vote. Measured across the
+// 358 directories the transcripts on this machine name, 29 of them were in that
+// state: the folder is gone, the repository it was part of is not.
+test('work in a folder that has since gone still counts for its repository', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-gone-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const mkRepo = (name, files) => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-' + name + '-'));
+    t.after(() => fs.rmSync(r, { recursive: true, force: true }));
+    const git = (...a) => execFileSync('git', ['-C', r, ...a], { stdio: 'ignore',
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+    git('init', '-q');
+    git('config', 'user.email', 'p@e'); git('config', 'user.name', 'p');
+    for (const f of files) {
+      fs.mkdirSync(path.join(r, path.dirname(f)), { recursive: true });
+      fs.writeFileSync(path.join(r, f), '//\n');
+    }
+    git('add', '-A'); git('commit', '-qm', 'i');
+    return fs.realpathSync(r);
+  };
+  const started = mkRepo('gone-here', ['a.js']);
+  const went = mkRepo('gone-there', ['kept.js', 'old/one.js', 'old/two.js', 'old/three.js']);
+
+  const read = (fp) => JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { id: 'm' + fp, model: 'opus',
+      content: [{ type: 'tool_use', id: 't' + fp, name: 'Read', input: { file_path: fp } }] } }) + '\n';
+  const dir = path.join(home, 'projects', slugOf(started));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'vanished.jsonl'),
+    read(path.join(started, 'a.js'))
+    + ['old/one.js', 'old/two.js', 'old/three.js'].map(f => read(path.join(went, f))).join(''));
+
+  // the session finished, and then the folder it worked in was deleted
+  fs.rmSync(path.join(went, 'old'), { recursive: true, force: true });
+
+  const p = new Project(started);
+  assert.equal(p.baseFor('vanished'), went,
+    'the folder is gone, the repository it was part of is not');
+});
+
+// Claude Code is often run in a worktree, or in a container, and the folder it
+// recorded itself against is not always still there afterwards. Widening a gone
+// folder to the repository above it hands the session a file list it can never
+// match — measured on this machine, 4 of 30 projects are deleted worktrees, and
+// every one of them then reported the work as happening outside the project.
+test('a folder that is gone is not widened to the repository above it', (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-wt-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...a) => execFileSync('git', ['-C', repo, ...a], { stdio: 'ignore',
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+  git('init', '-q');
+  git('config', 'user.email', 'p@e'); git('config', 'user.name', 'p');
+  fs.writeFileSync(path.join(repo, 'kept.js'), '//\n');
+  git('add', '-A'); git('commit', '-qm', 'i');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-wth-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const live = path.join(fs.realpathSync(repo), 'wt', 'task_1');
+  fs.mkdirSync(path.join(live, 'src'), { recursive: true });
+  assert.equal(new Project(live).base, fs.realpathSync(repo),
+    'a folder that is there is read against the repository holding it');
+
+  // the session worked inside the worktree, and named it
+  const dir = path.join(home, 'projects', slugOf(live));
+  fs.mkdirSync(dir, { recursive: true });
+  const read = (fp) => JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { id: 'm' + fp, model: 'opus',
+      content: [{ type: 'tool_use', id: 't' + fp, name: 'Read', input: { file_path: fp } }] } }) + '\n';
+  fs.writeFileSync(path.join(dir, 'inwt.jsonl'),
+    ['src/a.js', 'src/b.js', 'src/c.js'].map(f => read(path.join(live, f))).join(''));
+
+  fs.rmSync(path.join(repo, 'wt'), { recursive: true, force: true });
+  const p = new Project(live);
+  assert.equal(p.base, live, 'gone, so there is nothing to widen to');
+  // and sorting its own paths must not climb out either: the worktree took its
+  // .git file with it, so nothing stops the walk but the recorded folder itself
+  assert.equal(p.baseFor('inwt'), live,
+    'a path inside the recorded folder belongs to it, whatever is above');
+  return p.universe('inwt').then(u => {
+    assert.deepEqual(u.files, [],
+      'and no file list — borrowing the parent repository\'s would be a denominator nothing can match');
+  });
+});
+
+// Windows and macOS are case-insensitive, and a transcript may spell a path any
+// way it likes — lib/parser.js has allowed for that since it started matching
+// paths against the root. The comparisons in project.js decide whether a path is
+// inside the folder the session was recorded against, and spelled differently
+// they used to say no: the floor stopped applying and a deleted worktree climbed
+// back out into its parent, which is the thing the floor exists to prevent.
+//
+// Only meaningful where the filesystem agrees. On Linux the two spellings really
+// are two folders, so there is nothing to fold and nothing to check.
+test('a path spelled in another case is still inside the recorded folder', (t) => {
+  const CASE_BLIND = process.platform === 'win32' || process.platform === 'darwin';
+  if (!CASE_BLIND) return t.skip('case-sensitive filesystem: the two spellings are two folders');
+
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-case-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...a) => execFileSync('git', ['-C', repo, ...a], { stdio: 'ignore',
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+  git('init', '-q');
+  git('config', 'user.email', 'p@e'); git('config', 'user.name', 'p');
+  fs.writeFileSync(path.join(repo, 'kept.js'), '//\n');
+  git('add', '-A'); git('commit', '-qm', 'i');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-caseh-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const wt = path.join(fs.realpathSync(repo), 'wt', 'task_1');
+  fs.mkdirSync(path.join(wt, 'src'), { recursive: true });
+
+  // the transcript names the same folder in a different case, as a user-typed or
+  // shell-completed path on these platforms routinely does
+  const shouted = wt.toUpperCase();
+  assert.notEqual(shouted, wt, 'the fixture has to differ in case for this to test anything');
+  const dir = path.join(home, 'projects', slugOf(wt));
+  fs.mkdirSync(dir, { recursive: true });
+  const read = (fp) => JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { id: 'm' + fp, model: 'opus',
+      content: [{ type: 'tool_use', id: 't' + fp, name: 'Read', input: { file_path: fp } }] } }) + '\n';
+  fs.writeFileSync(path.join(dir, 'shout.jsonl'),
+    ['src\\a.js', 'src\\b.js', 'src\\c.js'].map(f => read(path.join(shouted, f))).join(''));
+
+  fs.rmSync(path.join(repo, 'wt'), { recursive: true, force: true });
+  const p = new Project(wt);
+  assert.equal(p.baseFor('shout'), wt,
+    'the floor holds however the path is spelled');
+});
+
 test('without a repository the folder is the whole of it', (t) => {
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-plain-'));
   t.after(() => fs.rmSync(plain, { recursive: true, force: true }));
