@@ -16,9 +16,15 @@ npx claude-sketch
   <img src="docs/screenshot.png" alt="claude-sketch: footprints, attention share and file heat">
 </picture>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
+  <img src="docs/live.gif" alt="a read, then two edits: the mark, the arrow and the running line count">
+</picture>
+
+
 ## 👀 What you get
 
-- 👣 **footprints** — every file in the repo; filled = stepped on, dashed = walked past, `⋯16⋯` = never went near. Coverage counted against `git ls-files`.
+- 👣 **footprints** — every file in the repo; filled = stepped on, dashed = walked past, `⋯16⋯` = never went near. Coverage counted against the repository the session actually worked in — tracked files plus anything not ignored.
 - 🎯 **attention share** — treemap where **area = tool calls**. One file eating a third of the frame *is* the warning.
 - 🔥 **file heat** — 5m / 1h / whole session. Read-read-edit-run… or read-read-read-read. 😬
 - 📂 **folder picker** — the header lists every folder Claude Code has ever worked in (recovered from the transcripts themselves); switch without restarting.
@@ -44,6 +50,7 @@ all, so read it as *size of work*, not a bill. Failed calls get counted too — 
 | `-p, --project <dir>` | what to watch (default: cwd) |
 | `--port <n>` | default 4517 — **hops to the next free port if busy** |
 | `--strict-port` | fail instead of hopping |
+| `-d, --detach` | run in the background, hand the terminal back |
 | `--host <addr>` | default `127.0.0.1` (anything else warns loudly ⚠️) |
 | `--open` / `--no-open` | browser or no browser |
 | `-v, --version` · `-h, --help` | 🙂 |
@@ -51,7 +58,8 @@ all, so read it as *size of work*, not a bill. Failed calls get counted too — 
 ## ⚙️ How it works
 
 Claude Code already writes every event to `~/.claude/projects/<slug>/<session>.jsonl`
-(subagents in `<session>/subagents/**`). claude-sketch tails those files, pulls out
+(subagents in `<session>/subagents/**`), or wherever `CLAUDE_CONFIG_DIR` points. claude-sketch
+watches and tails those files, pulls out
 `tool_use` + `message.model` + `message.usage`, and streams it to the browser over SSE.
 
 **Measured, not guessed.** No DB, no build step, no framework, **zero dependencies**. 📦
@@ -63,15 +71,17 @@ Claude Code already writes every event to `~/.claude/projects/<slug>/<session>.j
 | idle CPU, browser attached | **0.06 %** of a core |
 | memory | ~60 MB (worst seen: 105 MB) |
 | 260 MB transcript, cold parse | **1.7 s** |
+| a tool call reaching the browser | **41 ms** (worst 121 ms under 8 parallel agents) |
 | polled endpoints (`/api/sessions`) | 1–5 ms |
 | switching to a 115-session project | 50 ms, then ~1 ms |
 | full browser re-render | ~30 ms, 4 MB heap |
 
 ## 🔒 Privacy
 
-Read-only by construction — no `writeFile`/`unlink`/`mkdir` anywhere in `lib/`. Binds
-`127.0.0.1`, and refuses any request that arrives under a domain name or from another
-origin. Clicking a file **asks first**. Zero outbound requests — fonts are bundled, so
+Read-only where it matters: nothing under your project or `~/.claude` is ever written to.
+The one file it does write is a marker in the temp dir, so a restart can tell whether a tab
+is already open. Binds `127.0.0.1`, and refuses any request that arrives under a domain
+name or from another origin. Clicking a file **asks first**. Zero outbound requests — fonts are bundled, so
 it works on a plane. 🏠
 
 ## 🎨 Details
