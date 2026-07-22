@@ -88,6 +88,23 @@ const freePort = (from) => new Promise((resolve) => {
   probe(from, PORT_TRIES);
 });
 
+// Knock on a port until something answers. `dead` lets a child that exited cut
+// the wait short instead of sitting out the whole deadline.
+const listening = (port, host, ms, dead) => new Promise((resolve) => {
+  const until = Date.now() + ms;
+  const knock = () => {
+    if (dead()) return resolve(false);
+    const s = net.connect({ port, host: host === '0.0.0.0' ? '127.0.0.1' : host });
+    s.once('connect', () => { s.destroy(); resolve(true); });
+    s.once('error', () => {
+      s.destroy();
+      if (dead() || Date.now() > until) return resolve(false);
+      setTimeout(knock, 60);
+    });
+  };
+  knock();
+});
+
 // Background mode: pick the port here so the parent can print a URL that is
 // actually true, then hand the terminal back.
 if (opt.detach && !process.env.CLAUDE_SKETCH_CHILD) {
@@ -105,6 +122,28 @@ if (opt.detach && !process.env.CLAUDE_SKETCH_CHILD) {
     { detached: true, windowsHide: true, stdio: ['ignore', log, log],
       env: { ...process.env, CLAUDE_SKETCH_CHILD: '1' } });
   child.unref();
+
+  // The port was free a moment ago, not necessarily now — and the child binds it
+  // with --strict-port, so losing that race ends it inside a log file nobody is
+  // watching, after this process has already printed a URL that never worked.
+  // Say nothing until it answers.
+  let died = false;
+  child.on('exit', () => { died = true; });
+  const up = await listening(port, opt.host, 5000, () => died);
+  // Something answering there is not proof it is ours: a server already on that
+  // port answers the first knock while our child is still failing to bind. Let
+  // the child fall over first — EADDRINUSE arrives long before this is up.
+  await new Promise(r => setTimeout(r, 300));
+  if (died) {
+    console.error(`claude-sketch: the background server stopped as soon as it started`);
+    console.error(`  port ${port} is most likely taken already — its output is in ${logPath}`);
+    process.exit(1);
+  }
+  if (!up) {
+    console.error(`claude-sketch: nothing came up on port ${port} (pid ${child.pid} is still running)`);
+    console.error(`  its output is in ${logPath}`);
+    process.exit(1);
+  }
   console.log(`✳ claude-sketch v${PKG.version} — running in the background`);
   console.log(`  open  http://localhost:${port}`);
   console.log(`  pid   ${child.pid}`);
@@ -128,7 +167,7 @@ let attempt = 0;
 server.on('error', (err) => {
   if (err.code !== 'EADDRINUSE') die(err.message);
   if (opt.strictPort) die(`port ${opt.port} is already in use (--strict-port)`);
-  if (++attempt >= PORT_TRIES) die(`ports ${opt.port - attempt}–${opt.port} are all in use`);
+  if (++attempt >= PORT_TRIES) die(`ports ${opt.port - attempt + 1}–${opt.port} are all in use`);
   console.log(`  port ${opt.port} is busy — another claude-sketch may be on it; trying ${opt.port + 1}…`);
   server.listen(++opt.port, opt.host);
 });
