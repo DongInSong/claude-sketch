@@ -13,14 +13,8 @@ npx claude-sketch
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="a read, then two edits: the mark, the arrow and the running line count">
+  <img src="docs/live.gif" alt="the whole page moving: footprints, treemap and file heat all marking the same file as it is read and then edited">
 </picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot.png" alt="claude-sketch: footprints, attention share and file heat">
-</picture>
-
 
 ## 👀 What you get
 

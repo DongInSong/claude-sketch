@@ -13,14 +13,8 @@ npx claude-sketch
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="읽기, 그리고 두 번의 수정 — 마크와 화살표, 실시간으로 오르는 줄 수">
+  <img src="docs/live.gif" alt="페이지 전체가 움직입니다 — 발자국·트리맵·파일 히트가 같은 파일을 읽고 고치는 동안 함께 표시">
 </picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot.png" alt="claude-sketch: 발자국, 주목 점유율, 파일 히트">
-</picture>
-
 
 ## 👀 보이는 것
 
