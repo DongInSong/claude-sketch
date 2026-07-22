@@ -372,6 +372,10 @@
   .note.good .ic{color:var(--good)} .note.warn .ic{color:var(--warn)} .note.bad .ic{color:var(--bad)}
   .note .why{color:var(--ink2);font-size:14.5px}
   .note u{text-decoration:underline wavy 2px;text-underline-offset:3px}
+  /* a file named in a note is the file, so it looks and behaves like one */
+  .note .fref{text-decoration:underline wavy 1.5px;text-underline-offset:3px;
+    text-decoration-color:color-mix(in srgb, var(--ink3) 65%, transparent)}
+  .note .fref:hover{color:var(--accent);text-decoration-color:var(--accent)}
   .note.warn u{text-decoration-color:var(--warn)} .note.bad u{text-decoration-color:var(--bad)}
 
   footer{margin-top:30px;color:var(--ink3);font-size:13.5px}
@@ -482,6 +486,7 @@ const I18N = {
     outsideBandTitle:'touched outside this project',
     outsideBand: '⋯⋯ {n} file(s) outside the project · {m} folder(s) ⋯⋯',
     lblFolders:'folders',
+    popRead:'{n} lines',
     pickTitle:'folders Claude Code has worked in', pickMeta:'{n} sessions · {a}',
     pickGone:'folder no longer on disk',
     moreSess:'+{n} more', lessSess:'show less', earlierTasks:'+{n} earlier tasks',
@@ -551,6 +556,7 @@ const I18N = {
     outsideBandTitle:'프로젝트 밖에서 접촉',
     outsideBand: '⋯⋯ 프로젝트 밖 파일 {n}개 · 폴더 {m}개 ⋯⋯',
     lblFolders:'폴더',
+    popRead:'{n}줄',
     pickTitle:'Claude Code가 작업한 적 있는 폴더', pickMeta:'세션 {n}개 · {a}',
     pickGone:'폴더가 지금은 없음',
     moreSess:'+{n}개 더', lessSess:'접기', earlierTasks:'이전 task {n}개 더',
@@ -620,6 +626,7 @@ const I18N = {
     outsideBandTitle:'プロジェクト外での接触',
     outsideBand: '⋯⋯ プロジェクト外のファイル {n} 件 · フォルダ {m} 件 ⋯⋯',
     lblFolders:'フォルダ',
+    popRead:'{n} 行',
     pickTitle:'Claude Code が作業したフォルダ', pickMeta:'セッション {n} 件 · {a}',
     pickGone:'フォルダは今はありません',
     moreSess:'+{n} 件', lessSess:'たたむ', earlierTasks:'以前の task {n} 件',
@@ -689,6 +696,7 @@ const I18N = {
     outsideBandTitle:'在项目之外接触',
     outsideBand: '⋯⋯ 项目外文件 {n} 个 · 文件夹 {m} 个 ⋯⋯',
     lblFolders:'文件夹',
+    popRead:'{n} 行',
     pickTitle:'Claude Code 干过活的文件夹', pickMeta:'{n} 个会话 · {a}',
     pickGone:'文件夹已不在',
     moreSess:'+{n} 个', lessSess:'收起', earlierTasks:'更早的 task {n} 个',
@@ -915,6 +923,11 @@ function applyEvent(ev, silent, replay){
         if (ev.err){ fs.errs++; fs.lastErr = ev.ts; }
       }
       if (ev.err) agentOf(m.agent).errs++;
+      // the read is over and we now know how much of the file came back — say so
+      // on the mark, if the mark is still up
+      const live = S.live && S.live.get(m.file);
+      if (!silent && live && Date.now() - live.ts < NOW_MS && live.op === 'read' && ev.rows > 1)
+        tagOn(live, 'read', PAL.read, v => { v.rows = (v.rows || 0) + ev.rows; });
       S.opFiles.delete(ev.id);
     } else if (ev.err && S.lastEv) {
       agentOf(S.lastEv.agent).errs++;          // bash/task failures have no file
@@ -950,7 +963,24 @@ function applyEvent(ev, silent, replay){
     // Agents work in parallel, so more than one file can be live at once. The
     // newest still wins S.now — it is what the arrow points at and what the
     // ticker reads — but the others stay marked instead of dropping to warm.
-    S.now = {file: ev.file, ts: Date.now(), op: ev.op, id: ev.id || ev.file};
+    // A file already live keeps its mark and its tags, so a second edit adds to
+    // the numbers already on screen rather than starting a fresh count beside
+    // them — three lines out then five in reads as one thing that happened.
+    const held = S.live.get(ev.file);
+    S.now = (held && Date.now() - held.ts < NOW_MS) ? held
+      // born is the stroke's own clock and its seed: while a file stays live the
+      // highlighter keeps the shape it was drawn with and does not re-strike
+      // itself on every call. ts is the last thing that happened, which is what
+      // decides when the mark has had its twenty seconds.
+      : {file: ev.file, tags: new Map(), born: Date.now(), id: ev.id || ev.file};
+    S.now.ts = Date.now(); S.now.op = ev.op;
+    // an edit knows what it did the moment it lands; a read only finds out when
+    // the result comes back, so that one is filled in later
+    if (ev.plus || ev.minus)
+      tagOn(S.now, 'edit', PAL.edit, v => {
+        v.plus = (v.plus || 0) + (ev.plus || 0);
+        v.minus = (v.minus || 0) + (ev.minus || 0);
+      });
     S.live.set(ev.file, S.now);
     if (S.live.size > LIVE_MAX) S.live.delete(S.live.keys().next().value);
   }
@@ -1266,6 +1296,25 @@ const WARM_MS = 90000;                     // touched-lately files keep a quiet 
 // average was 1.5 — so this is headroom, not a guess, and past it the page would
 // be scribble anyway.
 const LIVE_MAX = 8;
+// A tag keeps its arrival time so it only animates in once, and stamps the last
+// change so a number that moves can be seen moving.
+function tagOn(mark, kind, col, apply){
+  const v = mark.tags.get(kind) || { at: Date.now(), col };
+  apply(v);
+  v.hit = Date.now();
+  mark.tags.set(kind, v);
+}
+// Built when it is drawn, never stored, so what is on screen is the running
+// total and not whatever it said when the tag first appeared. In pieces, because
+// lines added and lines taken away are not the same news and should not be the
+// same colour.
+function tagParts(kind, v){
+  if (kind === 'read') return [{ text: t('popRead', {n: v.rows}), col: PAL.read }];
+  const out = [];
+  if (v.plus) out.push({ text: '+' + v.plus, col: PAL.edit });
+  if (v.minus) out.push({ text: '−' + v.minus, col: PAL.del });
+  return out;
+}
 const liveAt = (p) => { const n = S.live && S.live.get(p); return n && Date.now()-n.ts < NOW_MS ? n : null; };
 function isNow(p){ return !!liveAt(p); }
 // newest first, so the arrow and the drawing order agree
@@ -1287,7 +1336,11 @@ const nowAge   = () => (S && S.now) ? Date.now() - S.now.ts : Infinity;
 
 // The canvas hangs out past its panel on every side, so an arrow or a label
 // parked at the edge is drawn in the margin instead of being sliced off.
-const PAD_X = 52, PAD_Y = 34;
+// How far outside its panel a live mark may draw. The arrow and its label go up
+// and out, so the top row of a panel needs the headroom: at 34 the label cleared
+// the ceiling by one pixel and the tag above it was cut off by eleven. Measured
+// against the tallest thing a mark now draws — tag over label over arrow.
+const PAD_X = 52, PAD_Y = 76;
 function fitLive(id, host){
   const cv = $(id);
   const w = host.clientWidth, h = host.clientHeight;
@@ -1409,6 +1462,64 @@ function paperUnder(c, x, y, w2, h2, rnd, alpha){
   c.restore();
 }
 
+// What the mark cost: the line count of an edit the moment it lands, the size of
+// a read when the file comes back. It jumps in and then stays — a tag tucked in
+// above the label at an angle, rather than a number that blinks past before it
+// can be read. The mark's own rubber takes it away at the end, along with
+// everything else the mark drew.
+const POP_IN_MS = 260;              // the arrival hop
+// When the count moves the tag gets flicked: it jumps, rocks a few times and
+// settles, all of it dying away on its own. Nothing on this page moves in a
+// straight line, and a number that changed should be seen changing.
+const POP_HIT_MS = 620;
+function flick(since){
+  if (REDUCED || since > POP_HIT_MS) return { lift: 0, tilt: 0, grow: 1 };
+  const h = 1 - since / POP_HIT_MS;                 // 1 → 0
+  const rock = h * Math.sin(since / POP_HIT_MS * Math.PI * 3.4);
+  return { lift: h * h * 7, tilt: rock * 0.16, grow: 1 + h * h * 0.2 };
+}
+function popUp(c, x, y, tags, alpha){
+  if (!tags || !tags.size) return;
+  const now = Date.now();
+  c.save();
+  c.textAlign = 'left'; c.textBaseline = 'bottom';
+  c.font = '700 13px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
+  let i = 0;
+  const GAP = 5;
+  for (const [kind, v] of tags){
+    const parts = tagParts(kind, v);
+    if (!parts.length) continue;
+    const k = REDUCED ? 1 : Math.min(1, (now - v.at) / POP_IN_MS);
+    const ease = 1 - Math.pow(1 - k, 3);
+    // flicked on the way in, and again every time the count moves underneath
+    const f = flick(now - v.hit);
+    const widths = parts.map(p => c.measureText(p.text).width);
+    const w = widths.reduce((a, b) => a + b, 0) + GAP * (parts.length - 1);
+    const rnd = mulberry(hash(kind) + i);
+    c.save();
+    // turned about its middle, not its left end: tilting a 40px tag from one end
+    // lifts the far end by the whole width times the angle, which put the "−3" of
+    // a "+2 −3" through the top of the panel. About the middle it is half that,
+    // and it goes down as much as it goes up.
+    c.translate(x + 10 * ease + w / 2, y - (10 + i * 15) * ease - f.lift);
+    // a wider tag turns less, so however long the number gets its ends never
+    // rise more than a few pixels above the middle
+    c.rotate(-Math.min(0.16, 5 / Math.max(1, w / 2)) + i * 0.06 + f.tilt);
+    c.scale(f.grow, f.grow);
+    c.globalAlpha = (alpha ?? 1) * ease;
+    paperUnder(c, -w / 2 - 3, -12, w + 6, 16, rnd, c.globalAlpha);
+    let dx = -w / 2;
+    parts.forEach((p, j) => {
+      c.fillStyle = p.col || PAL.ink2;
+      c.fillText(p.text, dx, 0);
+      dx += widths[j] + GAP;
+    });
+    c.restore();
+    if (++i >= 2) break;            // two is enough beside a label
+  }
+  c.restore();
+}
+
 // The arrow and its label are one gesture, so they shake as one — a rigid
 // jitter, not a redrawn one. Two frequencies that don't divide into each other,
 // so it never settles into a rhythm you can predict.
@@ -1424,7 +1535,10 @@ function shake(){
 
 // arrow + "지금!" — drawn wherever there is room, flipping sides near an edge
 const labelLeft = (r) => r.x > 70;
-function pointAt(c, r, w, seed, alpha){
+// pops ride beside the label when there is one — the eye is already there — and
+// fall back to the mark's own corner for the live files that have no arrow,
+// since only the newest one gets pointed at.
+function pointAt(c, r, w, seed, alpha, pops){
   const left = labelLeft(r);
   const tx = left ? r.x-7 : r.x+r.w+7, ty = r.y + Math.min(r.h/2, 14);
   const len = 30, sx = tx + (left ? -len : len), sy = ty - len*0.8;
@@ -1465,6 +1579,9 @@ function pointAt(c, r, w, seed, alpha){
   paperUnder(c, left ? -tw : 0, -15, tw, 19, rnd, alpha);
   c.fillStyle = liveCol(); c.globalAlpha = alpha;
   c.fillText(word, 0, 0);
+  // beside the word, in the label's own frame, so the two read as one thing
+  c.textAlign = 'left';
+  popUp(c, left ? 6 : tw + 6, 0, pops, alpha);
   c.restore();
 }
 
@@ -1524,7 +1641,11 @@ const DRAW_MS = 340;                     // how long the pen takes to cross the 
 
 function drawLive(){
   const live = liveNow();                    // newest first
-  const newest = live[0];
+  // The arrow has to belong to the mark that liveCol() and liveWord() describe,
+  // and those read S.now. Two events landing in the same millisecond tie in the
+  // sort, and a tie put the arrow on one file wearing another one's colour and
+  // word — a blue "reading!" pinned to a green edit.
+  const newest = live.includes(S.now) ? S.now : live[0];
 
   // The panels are cleared by fitLive, so they are set up once and every live
   // file draws into them. Only the newest gets the arrow: one thing is being
@@ -1540,9 +1661,10 @@ function drawLive(){
     if (el.dataset.path) fogCells.set(el.dataset.path, el);
 
   for (const n of live){
-    const age = Date.now() - n.ts;
+    const age = Date.now() - n.ts;               // since the last call: decides the rubber
+    const drawn = Date.now() - (n.born || n.ts);  // since the stroke: decides the drawing on
     const editing = n.op === 'edit' && age < SPLAT_MS;
-    const prog = REDUCED ? 1 : Math.min(1, age/DRAW_MS);
+    const prog = REDUCED ? 1 : Math.min(1, drawn/DRAW_MS);
     const k = rubK(age, NOW_MS);
     const col = (n.op === 'del') ? PAL.ink3 : opCol(n.op || 'read');
     const seed = (what) => hash(n.id + what);   // steady for this mark
@@ -1553,7 +1675,10 @@ function drawLive(){
       const r = TM_RECTS.find(x => !x.agg && x.path === n.file);
       if (r){
         markerEdge(tc, { x: r.x+3, y: r.y+3, w: r.w-6, h: r.h-6 }, seed('tm'), prog, col);
-        if (lead) pointAt(tc, r, tmHost.clientWidth, seed('tma'), 1);
+        // the tag rides with the arrow: "reading! 838 lines" is one sentence, and
+        // when the arrow moves to another file the sentence goes with it rather
+        // than leaving its second half stranded on a mark nothing is pointing at
+        if (lead) pointAt(tc, r, tmHost.clientWidth, seed('tma'), 1, n.tags);
         if (editing) splat(tc, r.x + r.w - 12, r.y + 14, seed('tm'), age/SPLAT_MS);
         if (k > 0) rubOut(tc, markBox(r), seed('tm'), k);
       }
@@ -1564,7 +1689,7 @@ function drawLive(){
     if (fc && cell){
       const r = { x: cell.offsetLeft, y: cell.offsetTop, w: cell.offsetWidth, h: cell.offsetHeight };
       marker(fc, r, seed('fog'), prog, col);
-      if (lead) pointAt(fc, r, fogHost.clientWidth, seed('foga'), 1);
+      if (lead) pointAt(fc, r, fogHost.clientWidth, seed('foga'), 1, n.tags);
       if (editing) splat(fc, r.x + r.w, r.y, seed('fog'), age/SPLAT_MS);
       if (k > 0) rubOut(fc, markBox(r), seed('fog'), k);
     }
@@ -2435,15 +2560,26 @@ function renderTicker(ev){
 function renderNotes(){
   const out = [];
   const files = [...S.files.entries()];
+  // A note names a file, so the name should behave like the file does everywhere
+  // else on the page: its own tooltip, and a click that offers to open it. The
+  // tooltip is attached afterwards rather than written into the markup — fileTip
+  // returns HTML, and esc() is for text, not for the inside of an attribute.
+  const refs = new Map();
+  const attr = (s) => esc(s).replace(/"/g, '&quot;');
+  const fref = (p, s) => {
+    refs.set(p, s);
+    return `<span class="fref openable" data-path="${attr(p)}">${esc(p.split('/').pop())}</span>`;
+  };
+
   const rr = files.filter(([,s])=>s.reads>=4).sort((a,b)=>b[1].reads-a[1].reads);
   for (const [p,s] of rr.slice(0,2)){
     out.push({lv: s.reads>=7?'bad':'warn',
-      t: t('nRereadT', {f: esc(p.split('/').pop()), n: s.reads}),
+      t: t('nRereadT', {f: fref(p, s), n: s.reads}),
       why: t('nRereadW')});
   }
   const failing = files.filter(([,s])=>s.errs>=3).sort((a,b)=>b[1].errs-a[1].errs);
   for (const [p,s] of failing.slice(0,1))
-    out.push({lv:'bad', t: t('nErrT',{f:esc(p.split('/').pop()), n:s.errs}), why: t('nErrW')});
+    out.push({lv:'bad', t: t('nErrT',{f: fref(p, s), n:s.errs}), why: t('nErrW')});
   const totalErrs = [...S.agents.values()].reduce((a,x)=>a+x.errs,0);
   if (totalErrs >= 8 && !failing.length)
     out.push({lv:'warn', t: t('nErrAgentT',{n:totalErrs}), why: t('nErrAgentW')});
@@ -2457,7 +2593,17 @@ function renderNotes(){
   $('notes').innerHTML = out.slice(0,4).map(n=>`
     <div class="note ${n.lv}"><span class="ic">${n.lv==='good'?'✓':n.lv==='warn'?'!':'✗'}</span>
     <span>${n.t} <span class="why">— ${n.why}</span></span></div>`).join('');
+  for (const el of $('notes').querySelectorAll('.fref[data-path]')){
+    const s = refs.get(el.dataset.path);
+    if (s) el.dataset.tip = fileTip(el.dataset.path, s, true);
+  }
 }
+// The notes are rebuilt as markup, so the click lives on the container instead of
+// on names that get replaced out from under it.
+$('notes').addEventListener('click', (e)=>{
+  const el = e.target.closest && e.target.closest('.fref[data-path]');
+  if (el) openTarget(el.dataset.path, e);
+});
 function renderNoFiles(){
   const el = $('noFiles');
   const ops = Object.values(S.opCount).reduce((a,b)=>a+b,0);
