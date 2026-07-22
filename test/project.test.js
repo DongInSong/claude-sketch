@@ -83,6 +83,44 @@ test('a tool call still out means working, however long the file has sat still',
     'a session killed mid-call would claim to be working for ever');
 });
 
+// Claude Code records the folder it was started in, which is often a corner of
+// the repository. That folder stays the session's identity; the repository is
+// what a path is named against.
+test('a session started below its repository still sees the whole of it', (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-repo-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...a) => execFileSync('git', ['-C', repo, ...a],
+    { stdio: 'ignore', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+  git('init', '-q');
+  git('config', 'user.email', 'probe@example.com');
+  git('config', 'user.name', 'probe');
+  for (const d of ['bin', 'lib']) fs.mkdirSync(path.join(repo, d));
+  fs.writeFileSync(path.join(repo, 'bin', 'cli.js'), '//\n');
+  fs.writeFileSync(path.join(repo, 'lib', 'core.js'), '//\n');
+  fs.writeFileSync(path.join(repo, 'README.md'), '#\n');
+  git('add', '-A');
+  git('commit', '-qm', 'first');
+
+  const started = path.join(repo, 'bin');
+  const p = new Project(started);
+  assert.equal(p.root, started, 'the recorded folder is still what identifies the session');
+  assert.equal(p.base, fs.realpathSync(repo), 'the repository is the extent');
+  assert.ok(p.dir.includes(slugOf(started)), 'transcripts are still found by the recorded folder');
+
+  return p.universe().then(u => {
+    assert.equal(u.source, 'git');
+    assert.deepEqual(u.files.slice().sort(), ['README.md', 'bin/cli.js', 'lib/core.js'],
+      'named from the repository root, and the whole of it — not just bin/');
+  });
+});
+
+test('without a repository the folder is the whole of it', (t) => {
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-plain-'));
+  t.after(() => fs.rmSync(plain, { recursive: true, force: true }));
+  const p = new Project(plain);
+  assert.equal(p.base, p.root, 'nothing to widen to, so nothing changes');
+});
+
 // A file Claude just wrote belongs to the project the moment it exists, not once
 // someone runs git add. What keeps that from also meaning "and all of
 // node_modules" is --exclude-standard, so that is the half worth a test.
