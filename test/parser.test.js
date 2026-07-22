@@ -115,3 +115,16 @@ test('the newest typed prompt wins the title, ai-title is only a fallback', () =
   p.parseLine({ type: 'queue-operation', content: 'older', timestamp: '2026-01-01T00:00:05Z' }, 'main');
   assert.equal(p.title, 'now do the tests');
 });
+
+test('a result reports how many lines came back, whatever shape it arrives in', () => {
+  const p = new SessionParser('/r');
+  const res = (content) => p.parseLine({ type: 'user', timestamp: '2026-01-01T00:00:00Z',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'r' + Math.random(), content }] } },
+    'main').find(e => e.t === 'res');
+
+  assert.equal(res('one\ntwo\nthree').rows, 3, 'a plain string result');
+  assert.equal(res([{ type: 'text', text: 'a\nb' }, { type: 'text', text: 'c\nd\ne' }]).rows, 5,
+    'a result that arrives as blocks');
+  assert.equal(res('').rows, 0);
+  assert.equal(res(undefined).rows, 0, 'a result with no content at all');
+});
