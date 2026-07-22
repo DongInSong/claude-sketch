@@ -57,6 +57,13 @@ describe is out of reach of a sandbox this size. Treat p90 26 as a floor.
 files with 2+ agents on them   max 13 at once · present 92.8% of the fan-out
 ```
 
+How often that happens depends on how the work is divided, and the fixture
+decides that: with overlapping reading lists it is 92.8%, and with each worker
+given a stride of its own it falls to 42.6%. Both are real shapes — agents
+exploring one codebase overlap heavily, agents each assigned a directory barely
+do. The number to design against is the first: two on one file is the case the
+live layer handles worst, so it belongs in the fixture rather than left to luck.
+
 `LIVE_MAX = 8` cannot draw that. The cap was justified by counting how many
 files were touched inside any one *second*; a mark lives for twenty. The comment
 measures the wrong window, and for three quarters of a fan-out the page is
@@ -134,13 +141,41 @@ label: the highlighter colour already says it. Line counts and edit deltas stay
 happen.
 
 Several agents on one file share an arrow and read `ws3 gp2` rather than
-stacking identical arrows on the same 22px cell. That case is 92.8% of a
-fan-out, so it is the normal one; drawing it six times is noise, not
-information. Past three names it says `+n`.
+stacking identical arrows on the same 22px cell. Past three names it says `+n`.
 
 Each arrow carries its own colour and its own word. Those used to come off
 `S.now`, a single global — which cannot be right once six arrows are pointing at
-six different kinds of work at once.
+six different kinds of work at once. The code sits *next to* the word rather
+than replacing it: dropping "reading" on the grounds that the colour already
+says so leaves an arrow reading only `main`, which says nothing about what main
+is doing, and the payload beside it is empty until the result comes back. The
+word costs about 34px; being able to read the panel is worth more.
+
+Under a fan-out the live files are neighbours — agents work through a directory
+— so every label landed at the same height in the same band and six of them were
+a smear. They cycle through three heights now. And the side each label goes on
+is chosen by measuring it first: the old rule was "left, unless within 70px of
+the edge", which was right for a label reading `reading!` and wrong for one
+reading `ws63 fixing! 12 lines`, which ran off the canvas and lost its first
+word.
+
+Everything is drawn in three passes, because a canvas has no layers. Marks on
+their way out go first and are gone before anything else is laid down; then
+every highlighter; then every arrow, on top of all of them. Two bugs fall out of
+that ordering, and both were visible on screen. A rubber lifts whatever is under
+it inside its box, not only the mark it belongs to, so a mark halfway through
+its erase reached over neighbours drawn a moment earlier and took their ink —
+and the next frame put it back, which is what read as marks flickering out and
+half-returning. And an arrow drawn during its own mark's turn was painted over
+by the highlighter of every mark that came after it, so the arrows sat *behind*
+the marks.
+
+The rubber is also sized from what was actually drawn now. Its box used to be a
+constant — 124px to the left of the cell, 40px above — set when the label read
+`reading!`. A longer label reached past it, so the erase took the arrow and left
+the words hanging there, shaking, until their twenty seconds ran out. `pointAt`
+reports its own extent and the two boxes are joined, so no constant has to be
+kept in step with how long a label happens to be.
 
 Two caps rather than one, because a mark and an arrow cost different amounts:
 
@@ -202,7 +237,7 @@ really is about the browser.
 **Late line counts were dropped.** A read's `rows` arrives with the result and
 was folded onto the live mark only if that mark was still a read. When a second
 agent edited the same file first, the count went on the floor — and two agents
-on one file is 92.8% of a fan-out. Whether the result was a read is remembered
+on one file is most of a fan-out. Whether the result was a read is remembered
 from the call that made it, on `S.opFiles`, rather than guessed from whatever
 the mark says by the time it lands.
 
@@ -240,18 +275,38 @@ p50 151ms, p90 166ms, and every one of the nine workers was picked up within
 transcript is flushed on the turn, not on the call. The 600ms poll floor was
 never reached; the watches do their job.
 
+## What it held up to
+
+Driven at one agent, five, eight, twelve and thirteen, against a fixture of
+seventy-two files so the mark cap is actually reached:
+
+```
+13 agents live      one shared arrow 53 jumps in 10s · per agent, median 3
+                    live files p50 24 · p90 61 · max 70
+                    above LIVE_MAX = 32, so the panel says so
+frame cadence       p50 8.3ms · p90 8.4ms · max 16.2ms — no jank at any width
+tailer lag          p50 149ms · p90 179ms, unchanged by the dirty-set path
+events lost         none: of 24 transcripts the recorder saw, the 12 it saw only
+                    in part are unbroken prefixes, which is where the recording
+                    stopped, not a hole
+erase               ink falls to zero and stays there — no fragment left behind
+```
+
+The one-agent case still reads `reading! 838 lines` with no code, and `main`
+keeps its name rather than an initial.
+
 ## Still to work out
 
-- **Placement.** Two arrows on files that sit near each other can still overlap.
-  Agents on the *same* file share one arrow, so the exact-overlap case is gone,
-  but nothing spaces out neighbours. Keyed by agent the set is stable between
-  frames, so a slot can be held and only given up after a delay — that is the
-  shape of the fix, and it is not written.
+- **Placement.** Three bands pull neighbouring labels apart and the side is
+  chosen by measuring the label, so nothing is clipped or stacked — but eight
+  agents working inside one directory still crowd, because their files are
+  genuinely next to each other. Keyed by agent the set is stable between frames,
+  so a slot could be held and only given up after a delay. Not written.
 - **Eviction across two caps.** A file that keeps its mark, loses its arrow and
   gets it back must not re-animate as though it were new. `born` survives, so
   the highlighter does not re-strike; the arrow appearing again is untested.
-- **Whether six is right.** The cap is not measured, only afforded. Put it in
-  front of a wide fan-out and count how many labels can actually be read.
+- **Whether six is right.** The cap is not measured, only afforded. At eight
+  agents in one directory six labels is at the edge of readable.
 - **The boil that isn't.** The comment on the live marks promises lines that
   crawl, redrawn on a fresh seed ten times a second. The seed is per mark and
   `prog` saturates at 340ms, so after that every frame is pixel-identical: the

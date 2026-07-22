@@ -1193,6 +1193,11 @@ function applyEvent(ev, silent, replay){
       // the arrival clock. ts is when the work happened, which is what decides
       // when the mark has had its twenty seconds.
       : {file: ev.file, tags: new Map(), born: Date.now(), id: ev.id || ev.file};
+    // A file touched again while the rubber was already over it used to snap
+    // back whole on the next frame — half rubbed out, then instantly there
+    // again. It is live, so it should come back; it should come back the way it
+    // arrived the first time, drawn on. Restarting the stroke's clock does that.
+    if (held === mark && Date.now() - mark.ts > NOW_MS - ERASE_MS) mark.born = Date.now();
     // forward only: a flush can deliver an older event after a newer one, and a
     // mark whose clock walked backwards would expire early
     mark.ts = Math.max(mark.ts || 0, stamp); mark.op = ev.op;
@@ -1628,8 +1633,10 @@ const nowAge   = () => (S && S.now) ? Date.now() - S.now.ts : Infinity;
 // How far outside its panel a live mark may draw. The arrow and its label go up
 // and out, so the top row of a panel needs the headroom: at 34 the label cleared
 // the ceiling by one pixel and the tag above it was cut off by eleven. Measured
-// against the tallest thing a mark now draws — tag over label over arrow.
-const PAD_X = 52, PAD_Y = 76;
+// against the tallest thing a mark now draws — tag over label over arrow. Plus
+// the two extra bands a label can be lifted into when several arrows are on
+// neighbouring files, which is what a fan-out through a directory looks like.
+const PAD_X = 72, PAD_Y = 76 + 40;
 function fitLive(id, host){
   const cv = $(id);
   const w = host.clientWidth, h = host.clientHeight;
@@ -1777,12 +1784,14 @@ function flick(since){
 // reading brings the read total back — but drawing both put "145 lines" from the
 // read beside a label reading "fixing!", the two of them close enough to collide.
 const TAG_FOR = { read: 'read', edit: 'edit' };
+// Returns how wide the tag came out, or 0 for nothing drawn — the rubber has to
+// take the whole gesture, and a tag it did not know about is a tag left behind.
 function popUp(c, x, y, mark, alpha){
   const kind = mark && TAG_FOR[mark.op];
   const v = kind && mark.tags && mark.tags.get(kind);
-  if (!v) return;
+  if (!v) return 0;
   const parts = tagParts(kind, v);
-  if (!parts.length) return;
+  if (!parts.length) return 0;
   const now = Date.now();
   const GAP = 5;
   c.save();
@@ -1815,8 +1824,9 @@ function popUp(c, x, y, mark, alpha){
       dx += widths[j] + GAP;
     });
     c.restore();
+    c.restore();
+    return w;                  // the caller has to know how far this reached
   }
-  c.restore();
 }
 
 // The arrow and its label are one gesture, so they shake as one — a rigid
@@ -1832,8 +1842,18 @@ function shake(){
   };
 }
 
-// arrow + "지금!" — drawn wherever there is room, flipping sides near an edge
-const labelLeft = (r) => r.x > 70;
+// arrow + "지금!" — drawn on whichever side has more room for it
+//
+// This used to be "left, unless within 70px of the edge", which was a fine rule
+// for a label reading "reading!". One reading "ws63 fixing! 12 lines" is more
+// than twice that, and on a treemap tile near the left edge it ran off the
+// canvas and lost its first word. Measure the label, then pick the side.
+const labelSide = (r, w, wide) => {
+  const room = (space) => space + PAD_X - 12;
+  const l = room(r.x), rr = room(w - (r.x + r.w));
+  if (l >= wide && rr >= wide) return l >= rr;   // both fit: the roomier one
+  return l >= rr;                                // neither does: lose less of it
+};
 // pops ride beside the label — the eye is already there — and fall back to the
 // mark's own corner for the live files that have no arrow.
 //
@@ -1844,10 +1864,29 @@ const labelLeft = (r) => r.x > 70;
 // names the only thing on screen. Measured against the 836px panel: the full
 // form is 170px and four fit, a real agent name is 240px and three fit, a code
 // is 78px.
-function pointAt(c, r, w, seed, alpha, mark, col, word, code){
-  const left = labelLeft(r);
+// Three heights, cycled by how recent the arrow is. Under a wide fan-out the
+// live files are neighbours — agents work through a directory — so every label
+// landed at the same height in the same band and the six of them were a smear.
+// Three bands is enough to pull them apart without needing the headroom six
+// would: adjacent arrows are never on the same line.
+const RISE = 20, BANDS = 3;
+function pointAt(c, r, w, seed, alpha, mark, col, word, code, band){
+  const HAND = (css().getPropertyValue('--hand').trim() || 'cursive');
+  // Who *and* what. The code was briefly allowed to replace the word, on the
+  // reasoning that the highlighter colour already says whether this is a read or
+  // an edit. It does — but an arrow reading only "main" says nothing about what
+  // main is doing, and the payload beside it is empty whenever the result has
+  // not come back yet, so the whole gesture went blank. Identity was meant to be
+  // added, not traded for. The word costs about 34px next to a code.
+  const say = code ? code + ' ' + word : word;
+  // measured before anything is drawn, because it decides which way this goes
+  c.save(); c.font = '700 16px ' + HAND;
+  const tw = c.measureText(say).width;
+  c.restore();
+  const left = labelSide(r, w, tw + 46);        // the label, and room for its tag
   const tx = left ? r.x-7 : r.x+r.w+7, ty = r.y + Math.min(r.h/2, 14);
-  const len = 30, sx = tx + (left ? -len : len), sy = ty - len*0.8;
+  const len = 30, rise = ((band || 0) % BANDS) * RISE;
+  const sx = tx + (left ? -len : len), sy = ty - len*0.8 - rise;
   if (sx < -PAD_X+4 || sx > w+PAD_X-4 || sy < -PAD_Y+16) return;
   c.save();
   const sh = shake();                       // the whole gesture moves together
@@ -1878,17 +1917,31 @@ function pointAt(c, r, w, seed, alpha, mark, col, word, code){
 
   c.translate(sx, sy - 5);
   c.rotate(-0.13 + (rnd()-0.5)*0.06);
-  c.font = '700 16px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
+  c.font = '700 16px ' + HAND;
   c.textAlign = left ? 'right' : 'left'; c.textBaseline = 'bottom';
-  const say = code || word;
-  const tw = c.measureText(say).width;
   paperUnder(c, left ? -tw : 0, -15, tw, 19, rnd, alpha);
   c.fillStyle = col; c.globalAlpha = alpha;
   c.fillText(say, 0, 0);
   // beside the word, in the label's own frame, so the two read as one thing
   c.textAlign = 'left';
-  popUp(c, left ? 6 : tw + 6, 0, mark, alpha);
+  const pw = popUp(c, left ? 6 : tw + 6, 0, mark, alpha);
   c.restore();
+
+  // What this gesture actually covered, in panel coordinates, so the rubber can
+  // take all of it. It used to be guessed at — 124px to the left of the cell,
+  // 40px above — and the guess was made when the label read "reading!". A label
+  // now reads "ws51 fixing! 12 lines", which is past the end of that box, so the
+  // rubber lifted the arrow and left the words hanging there, shaking, until
+  // their twenty seconds ran out. Measured instead of assumed: the label is
+  // rotated about its start, so its far end rides up by roughly width × the
+  // angle, and the tag above it lifts further again.
+  const wide = tw + (pw ? pw + 12 : 0);
+  const x0 = Math.min(tx, sx) - (left ? wide + 10 : 0);
+  const x1 = Math.max(tx, sx) + (left ? 0 : wide + 10);
+  const top = sy - 5 - 20 - wide * 0.15 - 16;      // label box, its tilt, the tag
+  const bot = Math.max(ty, sy) + 12;
+  const pad = 7;                                    // the shake, and the pen's width
+  return { x: x0 - pad, y: top - pad, w: (x1 - x0) + pad*2, h: (bot - top) + pad*2 };
 }
 
 // A mark's last moment: it doesn't dissolve, someone rubs it out. The rubber
@@ -1946,18 +1999,23 @@ function splat(c, x, y, seed, k, col){
 // how far into being rubbed out a mark is, given how long it lives
 const rubK = (age, life) => (age - (life - ERASE_MS)) / ERASE_MS;
 // Everything the mark occupies, so the rubber takes the whole thing and not just
-// the ring. Which is not the same box for every mark: only the newest one draws
-// an arrow and a label, and only it needs the room they take up. Sized for all
-// of them, the box was 162×74 around a 22px footprints cell — seven times the
-// area — and since a rubber lifts whatever is under it, the one mark on its way
-// out took its neighbours' marks with it, then let them back the moment it
-// expired and the next one started its own erase from nothing. Off by one cell
-// it would have been a smudge; at this size it read as the whole panel blinking.
-const markBox = (r, lead) => !lead
-  ? { x: r.x-16, y: r.y-10, w: r.w+32, h: r.h+20 }   // the highlighter's overshoot, no more
-  : labelLeft(r)
-    ? { x: r.x-124, y: r.y-40, w: r.w+140, h: r.h+52 }
-    : { x: r.x-16,  y: r.y-40, w: r.w+140, h: r.h+52 };
+// the ring. Which is not the same box for every mark: only a mark with an arrow
+// on it needs the room the arrow and its label take up. Sized for all of them,
+// the box was 162×74 around a 22px footprints cell — seven times the area — and
+// since a rubber lifts whatever is under it, the one mark on its way out took
+// its neighbours' marks with it, then let them back the moment it expired and
+// the next one started its own erase from nothing. Off by one cell it would have
+// been a smudge; at this size it read as the whole panel blinking.
+// Just the highlighter's overshoot now. Whatever an arrow added on top reports
+// its own extent, and the two are joined below — no constant here has to be kept
+// in step with how long a label happens to be.
+const markBox = (r) => ({ x: r.x-16, y: r.y-10, w: r.w+32, h: r.h+20 });
+const union = (a, b) => {
+  if (!b) return a;
+  if (!a) return b;
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  return { x, y, w: Math.max(a.x+a.w, b.x+b.w) - x, h: Math.max(a.y+a.h, b.y+b.h) - y };
+};
 
 const DRAW_MS = 340;                     // how long the pen takes to cross the mark
 
@@ -2041,8 +2099,9 @@ function drawLive(){
   const solo = A.length <= 1;                // "ws3" says nothing when it is the only one
   const byFile = new Map();
   for (const ar of A){
-    if (!byFile.has(ar.file)) byFile.set(ar.file, { op: ar.op, codes: [] });
-    byFile.get(ar.file).codes.push(shortAgent(ar.name));   // newest first, from the sort
+    if (!byFile.has(ar.file))
+      byFile.set(ar.file, { op: ar.op, codes: [], band: byFile.size });   // newest first
+    byFile.get(ar.file).codes.push(shortAgent(ar.name));
   }
   const label = (v) => solo ? null
     : v.codes.slice(0, 3).join(' ') + (v.codes.length > 3 ? ' +' + (v.codes.length - 3) : '');
@@ -2062,53 +2121,88 @@ function drawLive(){
   const G = geom(fogHost, rowHost, tmHost);
   if (fc) overflowNote(fc, hidden, G.fw, fogHost.clientHeight);
 
-  for (const n of live){
-    const age = Date.now() - n.ts;               // since the last call: decides the rubber
-    const drawn = Date.now() - (n.born || n.ts);  // since the stroke: decides the drawing on
-    const editing = n.op === 'edit' && age < SPLAT_MS;
-    const prog = REDUCED ? 1 : Math.min(1, drawn/DRAW_MS);
-    const k = rubK(age, NOW_MS);
-    const col = opInk(n.op);
-    const seed = (what) => hash(n.id + what);   // steady for this mark
-    // whoever is on this file right now, if anyone still is
-    const arw = byFile.get(n.file);
-    // the arrow speaks for the newest agent on the file, in that agent's colour,
-    // which is not necessarily what the mark last recorded
-    const acol = arw ? opInk(arw.op) : col;
-    const word = arw ? opWord(arw.op) : '';
-    const code = arw ? label(arw) : null;
+  const now = Date.now();
+  const state = (n) => {
+    const arw = byFile.get(n.file);             // whoever is on this file, if anyone still is
+    const age = now - n.ts;                     // since the last call: decides the rubber
+    const drawn = now - (n.born || n.ts);       // since the stroke: decides the drawing on
+    return {
+      n, age, arw,
+      editing: n.op === 'edit' && age < SPLAT_MS,
+      prog: REDUCED ? 1 : Math.min(1, drawn / DRAW_MS),
+      k: rubK(age, NOW_MS),
+      col: opInk(n.op),
+      seed: (what) => hash(n.id + what),        // steady for this mark
+      // the arrow speaks for the newest agent on the file, in that agent's
+      // colour, which is not necessarily what the mark last recorded
+      acol: arw ? opInk(arw.op) : opInk(n.op),
+      word: arw ? opWord(arw.op) : '',
+      code: arw ? label(arw) : null,
+    };
+  };
 
-    // treemap: rects are already in canvas coordinates
-    if (tc){
-      const r = G.tm.get(n.file);
-      if (r){
-        markerEdge(tc, { x: r.x+3, y: r.y+3, w: r.w-6, h: r.h-6 }, seed('tm'), prog, col);
-        // the tag rides with the arrow: "reading! 838 lines" is one sentence, and
-        // when the arrow moves to another file the sentence goes with it rather
-        // than leaving its second half stranded on a mark nothing is pointing at
-        if (arw) pointAt(tc, r, G.tw, seed('tma'), 1, n, acol, word, code);
-        if (editing) splat(tc, r.x + r.w - 12, r.y + 14, seed('tm'), age/SPLAT_MS, col);
-        if (k > 0) rubOut(tc, markBox(r, !!arw), seed('tm'), k);
-      }
+  // the highlighter, and the specks an edit throws off it
+  const paint = (s) => {
+    const { n, col, prog, age, seed, editing } = s;
+    const r = G.tm.get(n.file);
+    if (tc && r){
+      markerEdge(tc, { x: r.x+3, y: r.y+3, w: r.w-6, h: r.h-6 }, seed('tm'), prog, col);
+      if (editing) splat(tc, r.x + r.w - 12, r.y + 14, seed('tm'), age/SPLAT_MS, col);
     }
-
-    // fog map: the cell is a DOM box, measured against its own panel
     const fr = G.fog.get(n.file);
     if (fc && fr){
       marker(fc, fr, seed('fog'), prog, col);
-      if (arw) pointAt(fc, fr, G.fw, seed('foga'), 1, n, acol, word, code);
       if (editing) splat(fc, fr.x + fr.w, fr.y, seed('fog'), age/SPLAT_MS, col);
-      if (k > 0) rubOut(fc, markBox(fr, !!arw), seed('fog'), k);
     }
-
     // timeline: mark the whole row, since that is the line being read
     const rr = G.rows.get(n.file);
     if (rc && rr){
       marker(rc, rr, seed('row'), prog, col);
       if (editing) splat(rc, rr.x + rr.w - 26, rr.y + rr.h/2, seed('row'), age/SPLAT_MS, col);
-      if (k > 0) rubOut(rc, { x: rr.x, y: rr.y-3, w: rr.w, h: rr.h+6 }, seed('row'), k);
     }
-  }
+  };
+
+  // the arrow and its label, and where they landed
+  const point = (s) => {
+    const { n, arw, acol, word, code, seed } = s;
+    if (!arw) return null;
+    const r = G.tm.get(n.file), fr = G.fog.get(n.file);
+    return {
+      // the tag rides with the arrow: "reading! 838 lines" is one sentence, and
+      // when the arrow moves to another file the sentence goes with it rather
+      // than leaving its second half stranded on a mark nothing is pointing at
+      tm: tc && r ? pointAt(tc, r, G.tw, seed('tma'), 1, n, acol, word, code, arw.band) : null,
+      fog: fc && fr ? pointAt(fc, fr, G.fw, seed('foga'), 1, n, acol, word, code, arw.band) : null,
+    };
+  };
+
+  const erase = (s, at) => {
+    const { n, k, seed } = s;
+    const r = G.tm.get(n.file);
+    if (tc && r) rubOut(tc, union(markBox(r), at && at.tm), seed('tm'), k);
+    const fr = G.fog.get(n.file);
+    if (fc && fr) rubOut(fc, union(markBox(fr), at && at.fog), seed('fog'), k);
+    const rr = G.rows.get(n.file);
+    if (rc && rr) rubOut(rc, { x: rr.x, y: rr.y-3, w: rr.w, h: rr.h+6 }, seed('row'), k);
+  };
+
+  // Three passes, because a canvas has no layers and everything here is one.
+  //
+  // A rubber lifts whatever is already on the canvas inside its box, not only
+  // the mark it belongs to, so a mark halfway through its erase used to reach
+  // over neighbours drawn a moment earlier and take their ink with it — the next
+  // frame put them back, which is what read as marks flickering out and
+  // half-returning. And an arrow drawn during its own mark's turn was painted
+  // over by the highlighter of every mark that came after it, so under a fan-out
+  // the arrows sat behind the marks.
+  //
+  // So: the ones on their way out go first, complete, and are gone before
+  // anything else is laid down. Then every highlighter. Then every arrow, on top
+  // of all of them.
+  const marks = live.map(state);
+  for (const s of marks) if (s.k > 0){ paint(s); erase(s, point(s)); }
+  for (const s of marks) if (s.k <= 0) paint(s);
+  for (const s of marks) if (s.k <= 0) point(s);
 }
 
 // The loop only runs while something is live — an idle page draws nothing.
