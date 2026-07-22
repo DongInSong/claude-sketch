@@ -27,7 +27,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--rate') opt.rate = num();
   else if (a === '--seconds') opt.seconds = num();
   else if (a === '--check') opt.check = true;
-  else if (a === '--verify') { opt.verify = true; opt.check = true; opt.agents = 1; }
+  else if (a === '--verify') { opt.verify = true; opt.check = true; }
   else if (a === '--real') opt.real = true;
   else if (a === '--quiet') opt.quiet = true;
   else if (a === '--help' || a === '-h') { help(); process.exit(0); }
@@ -40,8 +40,10 @@ function help() {
   --rate <n>      tool calls per second, across all of them (default 12)
   --seconds <n>   how long to keep it up                  (default 10)
   --check         run a server and a client, and report timings
-  --verify        one agent, known input, and assert the stream matches it
-                  exactly — counts, op types, edit line deltas, order, tokens
+  --verify        known input, and assert the stream matches it exactly —
+                  counts, op types, edit line deltas, per-agent order and
+                  tokens, and one distinct label per writer
+                  (--verify --agents 1 is the main path on its own)
   --real          write into the real ~/.claude instead of a sandbox
   --quiet         only print the summary`);
 }
@@ -98,10 +100,11 @@ function emit(agent) {
   return id;
 }
 
-// What the transcript said, so the stream can be held against it. One writer, so
-// there is exactly one right answer — subagents come after this is solid.
+// What the transcript said, so the stream can be held against it. Each writer is
+// its own file, so ordering is only promised within one of them — a scan reads
+// main first and the subagents after, which interleaves them on the way out.
 const TOK = { fresh: 5, cr: 900, tout: 40 };
-function verify(got, lastUsage) {
+function verify(got, usage) {
   const bad = [];
   const say = (ok, msg) => { if (!ok) bad.push(msg); };
 
@@ -116,22 +119,44 @@ function verify(got, lastUsage) {
     say(g.file === want.file, `${id}: file ${g.file}, expected ${want.file}`);
     say(g.plus === want.plus, `${id}: plus ${g.plus}, expected ${want.plus}`);
   }
-  const order = got.map(g => sent.get(g.id).seq);
-  say(order.every((v, i) => i === 0 || v > order[i - 1]), 'events arrived out of order');
 
-  const n = sent.size;
-  if (lastUsage) {
-    say(lastUsage.tin === (TOK.fresh + TOK.cr) * n,
-      `tin ${lastUsage.tin}, expected ${(TOK.fresh + TOK.cr) * n}`);
-    say(lastUsage.tout === TOK.tout * n, `tout ${lastUsage.tout}, expected ${TOK.tout * n}`);
-    say(lastUsage.cr === TOK.cr * n, `cache read ${lastUsage.cr}, expected ${TOK.cr * n}`);
-  } else say(false, 'no usage event arrived at all');
+  // one writer, one label — and no two writers wearing the same one, or their
+  // work would be added up as if it came from a single agent
+  const labels = new Map();                 // writer -> Set(labels the stream used)
+  for (const g of got) {
+    if (!labels.has(g.writer)) labels.set(g.writer, new Set());
+    labels.get(g.writer).add(g.label);
+  }
+  for (const [writer, set] of labels)
+    say(set.size === 1, `${writer} arrived under ${set.size} labels: ${[...set].join(', ')}`);
+  const flat = [...labels.values()].map(s => [...s][0]);
+  say(new Set(flat).size === flat.length, `two writers share a label: ${flat.join(', ')}`);
 
-  console.log(`\nground truth — ${n} tool calls from one agent`);
+  // order within each writer
+  for (const [writer] of labels) {
+    const seqs = got.filter(g => g.writer === writer).map(g => g.seq);
+    say(seqs.every((v, i) => i === 0 || v > seqs[i - 1]), `${writer}: events arrived out of order`);
+  }
+
+  // tokens, per agent — every writer emits one usage record per tool call
+  for (const [writer, set] of labels) {
+    const label = [...set][0];
+    const n = [...sent.values()].filter(s => s.agent === writer).length;
+    const u = usage.get(label);
+    if (!u) { say(false, `${writer}: no usage event arrived`); continue; }
+    say(u.tin === (TOK.fresh + TOK.cr) * n, `${writer}: tin ${u.tin}, expected ${(TOK.fresh + TOK.cr) * n}`);
+    say(u.tout === TOK.tout * n, `${writer}: tout ${u.tout}, expected ${TOK.tout * n}`);
+  }
+
+  const wr = labels.size;
+  console.log(`\nground truth — ${sent.size} tool calls from ${wr} writer${wr > 1 ? 's' : ''}` +
+    (wr > 1 ? ' (main + subagents)' : ' (main only)'));
   if (!bad.length) {
-    console.log('  ✓ every call delivered exactly once, in order');
+    console.log('  ✓ every call delivered exactly once, in per-agent order');
     console.log('  ✓ op type, file path and edit line delta match on all of them');
-    console.log(`  ✓ tokens add up: ${lastUsage.tin} in (${lastUsage.cr} of it cached), ${lastUsage.tout} out`);
+    console.log('  ✓ one distinct agent label per writer');
+    console.log(`  ✓ tokens add up per agent (${[...usage.values()]
+      .reduce((a, u) => a + u.tout, 0)} out across ${wr})`);
     return true;
   }
   for (const b of bad.slice(0, 12)) console.log('  ✗ ' + b);
@@ -192,7 +217,7 @@ async function check() {
 
   const got = [];                       // {id, at, file, agent, lag, op, plus}
   const seenIds = new Set();
-  let lastUsage = null;
+  const usage = new Map();              // agent label -> newest usage event
   await new Promise((ready) => {
     http.get(`http://127.0.0.1:${port}/events?session=${SID}&k=${token}`, (res) => {
       let buf = '';
@@ -207,13 +232,13 @@ async function check() {
           if (d.t !== 'backlog') continue;
           const now = Date.now();
           for (const ev of d.events) {
-            if (ev.t === 'usage' && ev.agent === 'main') lastUsage = ev;
+            if (ev.t === 'usage') usage.set(ev.agent, ev);
             if (ev.t !== 'op' || !sent.has(ev.id)) continue;
             if (seenIds.has(ev.id)) { got.push({ ...sent.get(ev.id), id: ev.id, dup: true }); continue; }
             seenIds.add(ev.id);
             const s = sent.get(ev.id);
             got.push({ ...s, id: ev.id, op: ev.op, file: ev.file, plus: ev.plus,
-              lag: now - s.at, at: s.at });
+              writer: s.agent, label: ev.agent, lag: now - s.at, at: s.at });
           }
         }
       });
@@ -224,7 +249,7 @@ async function check() {
   await sleep(1200);                    // let the tail drain
 
   if (opt.verify) {
-    const ok = verify(got, lastUsage);
+    const ok = verify(got, usage);
     server.closeAllConnections(); server.close();
     if (!ok) process.exitCode = 1;
     return;
