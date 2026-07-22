@@ -174,6 +174,68 @@ test('a session that went to work elsewhere is read against where it went', (t) 
   });
 });
 
+// A long session opens with its own working papers — a plan, a memory note, a
+// couple of scratch files — and only then gets to work. Judged on its opening
+// alone, the biggest session measured on this machine put its real repository at
+// 45% of 22 paths where the whole file put it at 71% of 504, lost the vote, and
+// was read against a tree it had left: coverage 0 of 34, and the page reporting
+// work "outside this project" for a project it never left.
+test('a session is judged on what it did, not on how it opened', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-ends-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const mkRepo = (name, files) => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-' + name + '-'));
+    t.after(() => fs.rmSync(r, { recursive: true, force: true }));
+    const git = (...a) => execFileSync('git', ['-C', r, ...a], { stdio: 'ignore',
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+    git('init', '-q');
+    git('config', 'user.email', 'p@e'); git('config', 'user.name', 'p');
+    for (const f of files) {
+      fs.mkdirSync(path.join(r, path.dirname(f)), { recursive: true });
+      fs.writeFileSync(path.join(r, f), '//\n');
+    }
+    git('add', '-A'); git('commit', '-qm', 'i');
+    return fs.realpathSync(r);
+  };
+  const started = mkRepo('open-here', ['a.js']);
+  const went = mkRepo('open-there', ['src/one.js', 'src/two.js', 'lib/three.js']);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-scratch-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+
+  const read = (fp) => JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { id: 'm' + fp, model: 'opus',
+      content: [{ type: 'tool_use', id: 't' + fp, name: 'Read', input: { file_path: fp } }] } }) + '\n';
+  // a megabyte of talk between the two ends, so the middle is what gets skipped
+  const filler = JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { id: 'pad', model: 'opus', content: [{ type: 'text', text: 'x'.repeat(4096) }] } }) + '\n';
+
+  const dir = path.join(home, 'projects', slugOf(started));
+  fs.mkdirSync(dir, { recursive: true });
+  const head = read(path.join(started, 'a.js'))
+    + read(path.join(home, 'plans', 'the-plan.md'))
+    + read(path.join(scratch, 'notes.txt'))
+    + read(path.join(scratch, 'out.json'));
+  const tail = ['src/one.js', 'src/two.js', 'lib/three.js', 'src/one.js']
+    .map(f => read(path.join(went, f))).join('');
+  fs.writeFileSync(path.join(dir, 'late.jsonl'),
+    head + filler.repeat(1400) + tail);          // ~5.7MB: both ends read, middle skipped
+
+  const p = new Project(started);
+  const base = p.baseFor('late');
+  assert.ok(fs.existsSync(path.join(base, 'src', 'one.js')),
+    'the work at the end counts, not just the papers at the start');
+  // the transcript folder and a scratch directory are not candidates: one is the
+  // session writing about itself, the other is no repository at all
+  assert.ok(!base.startsWith(home) && !base.startsWith(scratch));
+});
+
 test('without a repository the folder is the whole of it', (t) => {
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-plain-'));
   t.after(() => fs.rmSync(plain, { recursive: true, force: true }));
