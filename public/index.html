@@ -399,6 +399,20 @@
   @media (prefers-reduced-motion: reduce){ .dl.pop{animation:none} }
   .mc .em{position:absolute;font-size:11px;right:-3px;top:-6px;color:var(--op-edit)}
   @media (max-width:640px){ .fgrow .ilab{width:124px;font-size:12.5px} .mc{width:19px;height:19px} }
+  /* A phone has no room to hold a line open. Measured on a 377px viewport the
+     page ran 204px past its own edge and 154 of it was these two: an agent row
+     and a session title, both told never to wrap. Let them. */
+  @media (max-width:640px){
+    .agents .nw{white-space:normal}
+    /* A flex item sizes itself to its content and will not shrink below it
+       unless told, and a session title is one unbroken run of prompt text.
+       They still wrap onto their own lines; each is just capped at the width
+       there is, and cut with an ellipsis rather than pushing the page sideways. */
+    /* flex:1 0 100% cannot give way — the row is pinned at its parent's full
+       width whatever is inside it, and the padding then pushes past the edge */
+    #sessLinks{flex:1 1 auto;min-width:0}
+    .slink{max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  }
 
   /* treemap */
   .tmwrap{position:relative}
@@ -785,7 +799,7 @@ const I18N = {
     liveNow:'実行中', doneAt:'完了 · {a}',
     nowLabel:'いま!',
     nowRead:'読んでる!', nowGrep:'探してる!', nowEdit:'直してる!', nowDel:'消した!',
-    foldTasks:'▸ task {n} 件を隠す{s}', showTasks:'▾ task {n} 件{s}', taskWord:'', taskWords:'',
+    foldTasks:'▸ task {n} 件 非表示{s}', showTasks:'▾ task {n} 件{s}', taskWord:'', taskWords:'',
     taskRun:'実行中', taskDone:'{d}で完了', taskSpawn:'{a}に開始',
     mainRun:'作業中', mainIdle:'待機', lastDo:'直近 {op} {f}', spanFor:'稼働 {d}',
     secFold:'クリックでたたむ',
@@ -860,7 +874,7 @@ const I18N = {
     liveNow:'进行中', doneAt:'已完成 · {a}',
     nowLabel:'现在!',
     nowRead:'在读!', nowGrep:'在找!', nowEdit:'在改!', nowDel:'删了!',
-    foldTasks:'▸ 隐藏 {n} 个 task{s}', showTasks:'▾ {n} 个 task{s}', taskWord:'', taskWords:'',
+    foldTasks:'▸ 已隐藏 {n} 个 task{s}', showTasks:'▾ {n} 个 task{s}', taskWord:'', taskWords:'',
     taskRun:'运行中', taskDone:'用时 {d}', taskSpawn:'{a} 开始',
     mainRun:'工作中', mainIdle:'空闲', lastDo:'刚刚 {op} {f}', spanFor:'累计 {d}',
     secFold:'点击折叠',
@@ -1663,7 +1677,15 @@ const nowLeft = () => (S && S.now) ? dieAt(S.now) - Date.now() : -1;
 // against the tallest thing a mark now draws — tag over label over arrow. Plus
 // the two extra bands a label can be lifted into when several arrows are on
 // neighbouring files, which is what a fan-out through a directory looks like.
-const PAD_X = 72, PAD_Y = 76 + 40;
+// The canvases hang outside their panels on purpose, and being absolutely
+// positioned they still count towards how wide the document is. Measured on a
+// 377px viewport the page ran 204px past its own edge, 44 of it these margins.
+// On a phone there is no room for a 200px label anyway, so the margin follows
+// the window rather than insisting on the width a desktop label wants.
+const PAD_Y = 76 + 40;
+let PAD_X = 72;
+const fitPad = () => { PAD_X = Math.max(18, Math.min(72, Math.round(innerWidth * 0.06))); };
+fitPad();
 function fitLive(id, host){
   const cv = $(id);
   const w = host.clientWidth, h = host.clientHeight;
@@ -2997,7 +3019,17 @@ function renderSessLinks(){
     box.appendChild(note);
   }
 }
-let tasksFolded = (()=>{ try{ return localStorage.getItem('cs-fold')==='1'; }catch(e){ return false; } })();
+// null until somebody says otherwise, because the right default is not the same
+// at two subagents as at seventy.
+//
+// Twelve rows of agent, each with its brief under it, put the first drawing
+// 1176px down the page — more than a laptop viewport, so opening a wide fan-out
+// showed a list where the point of the tool should be. Past a handful the list
+// folds itself; a fold or an unfold is remembered and wins from then on.
+const FOLD_OVER = 6;
+let taskFold = (()=>{ try{ const v = localStorage.getItem('cs-fold');
+  return v === '1' ? true : v === '0' ? false : null; }catch(e){ return null; } })();
+const foldedNow = (subs) => taskFold === null ? subs > FOLD_OVER : taskFold;
 // When the Task call that spawned an agent can be found, that is its start;
 // otherwise the first thing it did, which is close and is all there is —
 // measured across every session on this machine, 69% of subagents record no link
@@ -3097,11 +3129,12 @@ function renderAgents(){
   const rows = [...S.agents.entries()].sort((x,y)=>
     x[0]==='main' ? -1 : y[0]==='main' ? 1 : byNewest(x, y));
   const subs = rows.length - 1;
+  const folded = foldedNow(subs);
   const TASK_LIMIT = 12;
   const skipped = Math.max(0, subs - TASK_LIMIT);
   const visible = new Set(rows.filter(([nm])=>nm!=='main').slice(0, TASK_LIMIT).map(([nm])=>nm));
   for (const [nm, a] of rows){
-    if (nm !== 'main' && (tasksFolded || !visible.has(nm))) continue;
+    if (nm !== 'main' && (folded || !visible.has(nm))) continue;
     const on = S.filter === nm, off = S.filter && !on;
     const b = document.createElement('button');
     b.type = 'button';
@@ -3171,23 +3204,23 @@ function renderAgents(){
       f.type = 'button';
       f.className = 'fold';
       const word = t(subs === 1 ? 'taskWord' : 'taskWords');
-      f.textContent = tasksFolded ? t('foldTasks',{n:subs, s:word}) : t('showTasks',{n:subs, s:word});
+      f.textContent = folded ? t('foldTasks',{n:subs, s:word}) : t('showTasks',{n:subs, s:word});
       f.addEventListener('click', ()=>{
-        tasksFolded = !tasksFolded;
-        try{ localStorage.setItem('cs-fold', tasksFolded?'1':'0'); }catch(e){}
-        if (tasksFolded && S.filter && S.filter !== 'main') setFilter(S.filter);  // reset a hidden filter
+        taskFold = !folded;                       // an explicit choice, from now on
+        try{ localStorage.setItem('cs-fold', taskFold?'1':'0'); }catch(e){}
+        if (taskFold && S.filter && S.filter !== 'main') setFilter(S.filter);  // reset a hidden filter
         else renderAgents();
       });
       b.insertAdjacentElement('afterend', f);
     }
   }
-  if (skipped && !tasksFolded){
+  if (skipped && !folded){
     const more = document.createElement('div');
     more.className = 'aghint';
     more.textContent = t('earlierTasks', {n: skipped});
     box.appendChild(more);
   }
-  if (S.agents.size > 1 && !tasksFolded){
+  if (S.agents.size > 1 && !folded){
     const h = document.createElement('div');
     h.className = 'aghint';
     h.textContent = S.filter ? t('filterOn', {a:S.filter}) : t('filterHint');
@@ -3390,7 +3423,7 @@ setInterval(async ()=>{
   await loadUniverse();
   if (S && S.ready) renderAll();
 }, 60000);
-addEventListener('resize', ()=>{ if (S && S.ready) renderAll(); });
+addEventListener('resize', ()=>{ fitPad(); dropGeom(); if (S && S.ready) renderAll(); });
 
 /* ══ boot ══ */
 if (document.fonts && document.fonts.ready)
