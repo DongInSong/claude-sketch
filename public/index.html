@@ -2020,6 +2020,20 @@ function drawStrip(path, win){
       }
       ctx.stroke();
     }
+    // under the pointer: the same ring a footprints cell gets, drawn by hand.
+    // Inside the square's own rotated frame, so it sits on the square rather
+    // than on the grid the square is only roughly aligned to.
+    if (i === r.hover){
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = PAL.accent; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+      const x0 = -cw/2-0.5, y0 = -h/2+1, x1 = cw/2+0.5, y1 = h/2-1;
+      ctx.beginPath();
+      wavyLine(ctx, x0, y0, x1, y0, rnd, 1.1);
+      wavyLine(ctx, x1, y0, x1, y1, rnd, 1.1);
+      wavyLine(ctx, x1, y1, x0, y1, rnd, 1.1);
+      wavyLine(ctx, x0, y1, x0, y0, rnd, 1.1);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }
@@ -2064,7 +2078,7 @@ function renderRows(){
         el.className = 'frow';
         el.innerHTML = `<span class="nm"><span class="opdot">●</span><span class="fn"></span><span class="mk"></span></span>
           <canvas></canvas><span class="val"><span class="lines"></span> <b></b><span class="dl"></span></span>`;
-        r = { el, cv: el.querySelector('canvas'),
+        r = { el, cv: el.querySelector('canvas'), hover: null,
           parts:{ dot: el.querySelector('.opdot'), fn: el.querySelector('.fn'), mk: el.querySelector('.mk'),
                   tot: el.querySelector('.val b'), dl: el.querySelector('.dl'),
                   lines: el.querySelector('.lines') } };
@@ -2079,8 +2093,15 @@ function renderRows(){
           const c = r.detail && r.detail[i];
           if (c && c.n) r.cv.dataset.tip = stripTip(p, c);
           else delete r.cv.dataset.tip;
+          // redraw only when the pointer crosses into another square, not on
+          // every mousemove — the ring is drawn into the strip itself
+          const on = (c && c.n) ? i : null;
+          if (on !== r.hover){ r.hover = on; drawStrip(p); }
         });
-        r.cv.addEventListener('mouseleave', ()=>{ delete r.cv.dataset.tip; });
+        r.cv.addEventListener('mouseleave', ()=>{
+          delete r.cv.dataset.tip;
+          if (r.hover !== null){ r.hover = null; drawStrip(p); }
+        });
         rowEls.set(p, r);
       }
       r.parts.dot.style.color = opCol(domOp(s.ops));
