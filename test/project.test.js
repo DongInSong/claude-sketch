@@ -104,8 +104,12 @@ test('a session started below its repository still sees the whole of it', (t) =>
   const started = path.join(repo, 'bin');
   const p = new Project(started);
   assert.equal(p.root, started, 'the recorded folder is still what identifies the session');
-  assert.equal(p.base, fs.realpathSync(repo), 'the repository is the extent');
   assert.ok(p.dir.includes(slugOf(started)), 'transcripts are still found by the recorded folder');
+  // Checked by what is at the path, not by how it is spelled: on Windows
+  // os.tmpdir() hands back the 8.3 short name and git reports the long one, and
+  // the two strings differ while naming the same folder.
+  assert.notEqual(p.base, p.root, 'the extent moved up out of bin/');
+  assert.ok(fs.existsSync(path.join(p.base, 'lib', 'core.js')), 'and it is the repository');
 
   return p.universe().then(u => {
     assert.equal(u.source, 'git');
@@ -157,8 +161,12 @@ test('a session that went to work elsewhere is read against where it went', (t) 
   fs.writeFileSync(path.join(dir, 'stayed.jsonl'), line(path.join(started, 'a.js')));
 
   const p = new Project(started);
-  assert.equal(p.baseFor('moved'), went, 'followed the work');
-  assert.equal(p.baseFor('stayed'), started, 'nothing to follow, so it stays');
+  // again by what is there rather than how it is spelled
+  assert.ok(fs.existsSync(path.join(p.baseFor('moved'), 'src', 'one.js')),
+    'followed the work into the other repository');
+  assert.ok(!fs.existsSync(path.join(p.baseFor('stayed'), 'src', 'one.js')),
+    'nothing to follow, so it stays');
+  assert.ok(fs.existsSync(path.join(p.baseFor('stayed'), 'a.js')));
 
   return p.universe('moved').then(u => {
     assert.deepEqual(u.files.slice().sort(), ['lib/three.js', 'src/one.js', 'src/two.js'],
