@@ -487,6 +487,7 @@ const I18N = {
     flagJunk:'⚠ dependency / cache path',
     quietBand: '⋯⋯ {n} quiet files · {m} folder(s) ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
+    coverageCapped: '{a} / {b} · only the first {b} of {n} files are counted',
     noActivity: 'no activity yet',
     nRereadT: '<u>{f}</u> read {n}× — probably already in context',
     nRereadW: 'likely duplicated context',
@@ -552,6 +553,7 @@ const I18N = {
     flagJunk:'⚠ 의존성 / 캐시 경로',
     quietBand: '⋯⋯ 조용한 파일 {n}개 · 폴더 {m}개 ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
+    coverageCapped: '{a} / {b} · {n}개 중 앞 {b}개만 셈',
     noActivity: '아직 활동 없음',
     nRereadT: '<u>{f}</u> {n}번이나 다시 읽음 — 이미 컨텍스트에 있을 텐데',
     nRereadW: '중복 컨텍스트 소비 추정',
@@ -617,6 +619,7 @@ const I18N = {
     flagJunk:'⚠ 依存 / キャッシュのパス',
     quietBand: '⋯⋯ 静かなファイル {n} 件 · フォルダ {m} 件 ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
+    coverageCapped: '{a} / {b} · {n} 件中 先頭 {b} 件のみ集計',
     noActivity: 'まだ動きがありません',
     nRereadT: '<u>{f}</u> を {n} 回読み直し — すでにコンテキストにあるかも',
     nRereadW: '文脈の重複消費とみられます',
@@ -682,6 +685,7 @@ const I18N = {
     flagJunk:'⚠ 依赖 / 缓存路径',
     quietBand: '⋯⋯ 安静文件 {n} 个 · 文件夹 {m} 个 ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
+    coverageCapped: '{a} / {b} · 共 {n} 个文件，仅统计前 {b} 个',
     noActivity: '还没有活动',
     nRereadT: '<u>{f}</u> 重读 {n} 次 · 多半已在上下文里',
     nRereadW: '疑似重复消耗上下文',
@@ -900,7 +904,7 @@ function applyEvent(ev, silent, replay){
   S.lastEv = ev;
   if (ev.op === 'bash' || ev.op === 'task') return;
   const fs = S.files.get(ev.file) || {ops:{read:0,grep:0,edit:0,del:0}, total:0, tokens:0,
-    agents:new Set(), reads:0, firstIx:S.n++, delta:0, deltaT:0, hb:{}, plus:0, minus:0,
+    agents:new Set(), reads:0, firstIx:S.n++, delta:0, deltaT:0, hb:{}, hbo:{}, plus:0, minus:0,
     gone:false, errs:0, lastErr:0};
   fs.ops[ev.op] = (fs.ops[ev.op]||0)+1; fs.total++;
   if (ev.plus) fs.plus += ev.plus;
@@ -921,7 +925,12 @@ function applyEvent(ev, silent, replay){
     S.live.set(ev.file, S.now);
     if (S.live.size > LIVE_MAX) S.live.delete(S.live.keys().next().value);
   }
-  fs.hb[Math.floor(ev.ts/BUCKET)] = (fs.hb[Math.floor(ev.ts/BUCKET)]||0)+1;
+  const b = Math.floor(ev.ts/BUCKET);
+  fs.hb[b] = (fs.hb[b]||0)+1;
+  // what kind of work it was, kept beside the count: the strip is a timeline, so
+  // "read all through, then edited at the end" is the thing it should be able to
+  // say. hb itself stays a plain count — heatScore reads it as one.
+  (fs.hbo[b] = fs.hbo[b] || {})[ev.op] = ((fs.hbo[b] || {})[ev.op] || 0) + 1;
   S.files.set(ev.file, fs);
   S.opFiles.set(ev.id, {file: ev.file, agent: ev.agent});
   if (S.opFiles.size > 5000) S.opFiles.delete(S.opFiles.keys().next().value);
@@ -1083,6 +1092,7 @@ async function loadUniverse(){
       tree: [...dirs.entries()].sort((a,b)=>a[0].localeCompare(b[0])),
       total: u.files.length,
       set: new Set(u.files),
+      truncated: !!u.truncated, listed: u.total || u.files.length,
     };
   // A failed refresh should leave what we already know on screen — blanking it
   // would empty the fog map and drop coverage to nothing over one bad request.
@@ -1661,7 +1671,11 @@ function updateFog(){
   box.replaceChildren(frag);
   const total = UNIVERSE ? UNIVERSE.total : 0;
   const inU = UNIVERSE ? [...S.files.keys()].filter(p=>UNIVERSE.set.has(p)).length : S.files.size;
-  $('cov').textContent = total ? t('coverage', {a:inU, b:total, p:Math.round(inU/total*100)}) : '';
+  // A truncated file list makes the denominator arbitrary, so the percentage
+  // would be a confident lie — show the count and say what it is counting.
+  $('cov').textContent = !total ? ''
+    : UNIVERSE.truncated ? t('coverageCapped', {a:inU, b:total, n:UNIVERSE.listed})
+    : t('coverage', {a:inU, b:total, p:Math.round(inU/total*100)});
 }
 
 /* ══ treemap — crayon ══ */
@@ -1893,6 +1907,27 @@ function binHits(fs, win){                 // hb is keyed by 10s bucket; fold in
   }
   return cols;
 }
+// The same fold, but keeping what kind of work each column was mostly made of.
+// An edit outranks a read in the same column: it is the rarer and the louder
+// thing to have happened there.
+const OP_RANK = {edit:4, del:4, bash:3, grep:2, read:1};
+function binOps(fs, win){
+  const cols = new Array(COLS).fill(null);
+  for (const k in fs.hbo){
+    const ts = Number(k)*BUCKET;
+    if (ts < win.start || ts > win.now) continue;
+    const i = Math.min(COLS-1, Math.floor((ts - win.start)/win.col));
+    const tally = cols[i] || (cols[i] = {});
+    for (const op in fs.hbo[k]) tally[op] = (tally[op] || 0) + fs.hbo[k][op];
+  }
+  return cols.map(tally => {
+    if (!tally) return null;
+    let best = null;
+    for (const op in tally)
+      if (!best || (OP_RANK[op] || 0) > (OP_RANK[best] || 0)) best = op;
+    return best;
+  });
+}
 function renderRanges(){
   const box = $('heatRange');
   box.innerHTML = '';
@@ -1923,16 +1958,20 @@ function drawStrip(path, win){
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.clearRect(0,0,w,h);
   const cols = binHits(fs, win);
+  const ops = binOps(fs, win);
   const cw = w/COLS;
   for (let i=0;i<COLS;i++){
     const n = cols[i];
     if (!n) continue;
     const t2 = Math.min(1, Math.sqrt(n/heatMax));
     const rnd = mulberry(hash(path) + i);
+    // the colour says what happened here, the depth says how much of it — which
+    // is what the legend above the panel has always claimed
+    const col = ops[i] ? opCol(ops[i]) : PAL.heat;
     ctx.save();
     ctx.translate(i*cw + cw/2, h/2);
     ctx.rotate((rnd()-0.5)*0.16);
-    ctx.fillStyle = PAL.heat;
+    ctx.fillStyle = col;
     ctx.globalAlpha = 0.22 + t2*0.42;
     for (let k=0;k<2;k++){
       const jx=(rnd()-0.5)*2.4, jy=(rnd()-0.5)*2.4;
@@ -1940,7 +1979,7 @@ function drawStrip(path, win){
     }
     if (t2 > 0.62){
       ctx.globalAlpha = 0.5 + t2*0.3;
-      ctx.strokeStyle = PAL.heat; ctx.lineWidth = 1.3;
+      ctx.strokeStyle = col; ctx.lineWidth = 1.3;
       ctx.beginPath();
       for (let sx=-cw/2+2; sx<cw/2-2; sx+=3.2){
         ctx.moveTo(sx + rnd()*1.5, -h/2+3);

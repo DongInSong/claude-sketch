@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { Project, listProjects, configDir, slugOf } from '../lib/project.js';
 
 // Claude Code reads CLAUDE_CONFIG_DIR for where it keeps everything, and the
@@ -38,4 +39,36 @@ test('CLAUDE_CONFIG_DIR decides where the transcripts are looked for', (t) => {
   const found = listProjects().find(p => p.root === path.resolve(root));
   assert.ok(found, 'listProjects did not see a project under the overridden dir');
   assert.equal(found.sessions, 1);
+});
+
+// A file Claude just wrote belongs to the project the moment it exists, not once
+// someone runs git add. What keeps that from also meaning "and all of
+// node_modules" is --exclude-standard, so that is the half worth a test.
+test('the file universe counts untracked files but not ignored ones', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-univ-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const git = (...a) => execFileSync('git', ['-C', root, ...a],
+    { stdio: 'ignore', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+
+  git('init', '-q');
+  git('config', 'user.email', 'probe@example.com');
+  git('config', 'user.name', 'probe');
+  fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules/\n');
+  fs.writeFileSync(path.join(root, 'tracked.js'), '//\n');
+  git('add', '.gitignore', 'tracked.js');
+  git('commit', '-qm', 'first');
+
+  fs.writeFileSync(path.join(root, 'just-written.js'), '//\n');       // untracked, not ignored
+  fs.mkdirSync(path.join(root, 'node_modules', 'left-pad'), { recursive: true });
+  for (let i = 0; i < 50; i++)                                        // ignored, and plenty of it
+    fs.writeFileSync(path.join(root, 'node_modules', 'left-pad', `f${i}.js`), '//\n');
+
+  const u = await new Project(root).universe();
+  assert.equal(u.source, 'git');
+  assert.ok(u.files.includes('tracked.js'), 'lost a tracked file');
+  assert.ok(u.files.includes('just-written.js'), 'a new file is invisible until git add');
+  assert.equal(u.files.filter(f => f.includes('node_modules')).length, 0,
+    'ignored files leaked into the project file list');
+  assert.equal(u.truncated, undefined);
+  assert.equal(u.total, u.files.length);
 });
