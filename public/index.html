@@ -1556,8 +1556,16 @@ document.addEventListener('mousemove', e=>{
   if (tip !== dtipLast){ dtip.innerHTML = tip; dtipLast = tip; }
   if (!dtipOn){ dtip.classList.add('show'); dtipOn = true; }
   const tw = dtip.offsetWidth, th = dtip.offsetHeight;
-  dtip.style.left = Math.max(6, Math.min(innerWidth-tw-8, e.clientX+14))+'px';
-  dtip.style.top = (e.clientY-th-12 < 4 ? e.clientY+16 : e.clientY-th-12)+'px';
+  // clientWidth, not innerWidth: innerWidth counts the scrollbar, so a tip
+  // pinned to the right edge was held against a boundary the page cannot reach
+  // and spent its last fifteen pixels underneath the scrollbar.
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  dtip.style.left = Math.max(6, Math.min(vw-tw-8, e.clientX+14))+'px';
+  // and below the pointer only if it fits there; near the bottom it would
+  // otherwise hang off the end of the viewport
+  const above = e.clientY-th-12, below = e.clientY+16;
+  dtip.style.top = Math.max(4, above < 4 ? Math.min(below, vh-th-6) : above)+'px';
 });
 // Two signals decide "working", because neither is enough alone. A tool call
 // arriving over the event stream says so instantly — but tool calls sit further
@@ -2965,8 +2973,17 @@ const startOf = ([nm, a]) => (a.task && a.task.start) || a.firstTs || Infinity;
 //
 // Numbered here instead, per role and in the order they actually ran. A role
 // with only one agent keeps its plain name.
-let AGENT_NAME = new Map();
+let AGENT_NAME = new Map(), AGENT_CODE = new Map();
 const roleOf = (nm) => nm.replace(/ #\d+$/, '');
+// A role's initials, letters and digits only. "workflow-subagent" is "ws",
+// "general-purpose" is "gp". Anything that is not part of a word is dropped
+// rather than carried through: splitting a raw, un-renamed label produced
+// codes like "ws#", because the " #10" the transcript layer appends counts as a
+// word beginning with a hash.
+const initialsOf = (role) => {
+  const w = String(role).split(/[^A-Za-z0-9]+/).filter(Boolean);
+  return (w.map(x => x[0]).join('') || String(role)).slice(0, 3).toLowerCase();
+};
 function nameAgents(){
   const byRole = new Map();
   for (const entry of S.agents){
@@ -2975,30 +2992,54 @@ function nameAgents(){
     if (!byRole.has(r)) byRole.set(r, []);
     byRole.get(r).push(entry);
   }
-  AGENT_NAME = new Map();
+  AGENT_NAME = new Map(); AGENT_CODE = new Map();
+  // Initials are lossy, so two roles can want the same ones — "git-pusher" and
+  // "general-purpose" are both "gp". A key that names two different things is
+  // worse than a longer key, so the loser takes more of its first word until it
+  // is nobody else's. Sorted, so which one is the loser does not depend on the
+  // order the transcripts happened to be read in.
+  const taken = new Set(), short = new Map();
+  for (const r of [...byRole.keys()].sort()){
+    let s = initialsOf(r);
+    if (taken.has(s)){
+      const base = (String(r).split(/[^A-Za-z0-9]+/)[0] || String(r)).toLowerCase();
+      let n = 2;
+      while (n < base.length && taken.has(base.slice(0, n))) n++;
+      s = base.slice(0, n);
+      for (let k = 2; taken.has(s); k++) s = base.slice(0, n) + k;
+    }
+    taken.add(s); short.set(r, s);
+  }
   for (const [r, list] of byRole){
-    if (list.length === 1){ AGENT_NAME.set(list[0][0], r); continue; }
+    const s = short.get(r);
+    if (list.length === 1){
+      AGENT_NAME.set(list[0][0], r); AGENT_CODE.set(list[0][0], s);
+      continue;
+    }
     list.sort((x, y) => {
       const d = startOf(x) - startOf(y);
       return (Number.isNaN(d) ? 0 : d) || x[0].localeCompare(y[0]);
     });
-    list.forEach((e, i) => AGENT_NAME.set(e[0], r + ' ' + (i + 1)));
+    list.forEach((e, i) => {
+      AGENT_NAME.set(e[0], r + ' ' + (i + 1));
+      AGENT_CODE.set(e[0], s + (i + 1));
+    });
   }
 }
 const showAgent = (nm) => AGENT_NAME.get(nm) || nm;
-// The same agent, small enough to ride on an arrow. Initials of the role plus
-// the index nameAgents() gave it: "workflow-subagent 3" is "ws3", and
-// "general-purpose 2" is "gp2". Measured against the 836px footprints panel,
-// the full names are 240px and 222px — three arrows fit; the codes are 78px and
-// ten do. main keeps its name, which is already short and is the one everybody
-// can read.
-const shortAgent = (nm) => {
-  if (nm === 'main') return 'main';
-  const full = showAgent(nm);
-  const m = full.match(/^(.*?)(?:\s+(\d+))?$/);
-  const initials = m[1].split(/[\s\-_./]+/).filter(Boolean).map(w => w[0]).join('').slice(0, 3);
-  return (initials || m[1].slice(0, 2)) + (m[2] || '');
-};
+// The same agent, small enough to ride on an arrow: "workflow-subagent 3" is
+// "ws3", "general-purpose 2" is "gp2". Measured against the 836px footprints
+// panel, the full names are 240px and 222px — three arrows fit; the codes are
+// 78px and ten do. main keeps its name, which is already short and is the one
+// everybody can read.
+//
+// Read from the table nameAgents() built, so a code is unique across roles and
+// says the same thing as the agents panel. The fallback is for an agent that has
+// worked before the panel has been rendered again — the live layer draws at
+// 20fps and does not wait for a render — and it goes through roleOf, so the
+// " #10" the transcript layer appends never reaches the arrow.
+const shortAgent = (nm) =>
+  nm === 'main' ? 'main' : (AGENT_CODE.get(nm) || initialsOf(roleOf(nm)));
 
 function renderAgents(){
   const box = $('agents');
