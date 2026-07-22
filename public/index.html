@@ -904,7 +904,7 @@ function applyEvent(ev, silent, replay){
   S.lastEv = ev;
   if (ev.op === 'bash' || ev.op === 'task') return;
   const fs = S.files.get(ev.file) || {ops:{read:0,grep:0,edit:0,del:0}, total:0, tokens:0,
-    agents:new Set(), reads:0, firstIx:S.n++, delta:0, deltaT:0, hb:{}, hbo:{}, plus:0, minus:0,
+    agents:new Set(), reads:0, firstIx:S.n++, delta:0, deltaT:0, hb:{}, hbo:{}, hbd:{}, plus:0, minus:0,
     gone:false, errs:0, lastErr:0};
   fs.ops[ev.op] = (fs.ops[ev.op]||0)+1; fs.total++;
   if (ev.plus) fs.plus += ev.plus;
@@ -931,6 +931,10 @@ function applyEvent(ev, silent, replay){
   // "read all through, then edited at the end" is the thing it should be able to
   // say. hb itself stays a plain count — heatScore reads it as one.
   (fs.hbo[b] = fs.hbo[b] || {})[ev.op] = ((fs.hbo[b] || {})[ev.op] || 0) + 1;
+  if (ev.plus || ev.minus){
+    const d = fs.hbd[b] = fs.hbd[b] || {plus:0, minus:0};
+    d.plus += ev.plus || 0; d.minus += ev.minus || 0;
+  }
   S.files.set(ev.file, fs);
   S.opFiles.set(ev.id, {file: ev.file, agent: ev.agent});
   if (S.opFiles.size > 5000) S.opFiles.delete(S.opFiles.keys().next().value);
@@ -1911,22 +1915,42 @@ function binHits(fs, win){                 // hb is keyed by 10s bucket; fold in
 // An edit outranks a read in the same column: it is the rarer and the louder
 // thing to have happened there.
 const OP_RANK = {edit:4, del:4, bash:3, grep:2, read:1};
-function binOps(fs, win){
+// One square can stand for more than one kind of work — measured on real
+// sessions it is 0% of squares at the default 5m range and 2–24% at the wider
+// ones, and it was never more than two kinds. So: the louder one takes the
+// square, the other takes a band along the bottom. Two colours is the whole
+// range of the problem, and stacking bars into an 8px box would not be read.
+const rankOps = (ops) => Object.keys(ops).sort((a,b) => (OP_RANK[b]||0) - (OP_RANK[a]||0));
+// Everything a single square stands for, so hovering one can say it. Folded the
+// same way the drawing is, from the same buckets, so the tooltip and the picture
+// can never drift apart.
+function binDetail(fs, win){
   const cols = new Array(COLS).fill(null);
-  for (const k in fs.hbo){
+  const into = (k, add) => {
     const ts = Number(k)*BUCKET;
-    if (ts < win.start || ts > win.now) continue;
+    if (ts < win.start || ts > win.now) return;
     const i = Math.min(COLS-1, Math.floor((ts - win.start)/win.col));
-    const tally = cols[i] || (cols[i] = {});
-    for (const op in fs.hbo[k]) tally[op] = (tally[op] || 0) + fs.hbo[k][op];
-  }
-  return cols.map(tally => {
-    if (!tally) return null;
-    let best = null;
-    for (const op in tally)
-      if (!best || (OP_RANK[op] || 0) > (OP_RANK[best] || 0)) best = op;
-    return best;
+    const c = cols[i] || (cols[i] = {n:0, ops:{}, plus:0, minus:0, from:ts, to:ts});
+    c.from = Math.min(c.from, ts); c.to = Math.max(c.to, ts);
+    add(c);
+  };
+  for (const k in fs.hbo) into(k, c => {
+    for (const op in fs.hbo[k]){ c.ops[op] = (c.ops[op]||0) + fs.hbo[k][op]; c.n += fs.hbo[k][op]; }
   });
+  for (const k in fs.hbd) into(k, c => {
+    c.plus += fs.hbd[k].plus; c.minus += fs.hbd[k].minus;
+  });
+  return cols;
+}
+function stripTip(path, c){
+  const rows = [[t('lblHits'), String(c.n)]];
+  if (c.ops.read) rows.push([t('lblRead'), String(c.ops.read)]);
+  if (c.ops.grep) rows.push([t('lblSearch'), String(c.ops.grep)]);
+  if (c.ops.edit) rows.push([t('lblEdit'), String(c.ops.edit)]);
+  if (c.plus) rows.push([t('lblAdded'), '+'+c.plus]);
+  if (c.minus) rows.push([t('lblRemoved'), '−'+c.minus]);
+  const opt = c.ops.del ? {flag: t('flagGone'), bad: true} : {};
+  return tipBox(`${path.split('/').pop()} · ${fmtAgo(Date.now() - c.to)}`, rows, opt);
 }
 function renderRanges(){
   const box = $('heatRange');
@@ -1957,17 +1981,21 @@ function drawStrip(path, win){
   cv.width = w*DPR; cv.height = h*DPR;
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.clearRect(0,0,w,h);
-  const cols = binHits(fs, win);
-  const ops = binOps(fs, win);
+  // one fold, used for the picture and for what hovering a square says, so the
+  // two cannot drift apart
+  const det = binDetail(fs, win);
+  r.detail = det;
   const cw = w/COLS;
   for (let i=0;i<COLS;i++){
-    const n = cols[i];
+    const c = det[i];
+    const n = c && c.n;
     if (!n) continue;
     const t2 = Math.min(1, Math.sqrt(n/heatMax));
     const rnd = mulberry(hash(path) + i);
     // the colour says what happened here, the depth says how much of it — which
     // is what the legend above the panel has always claimed
-    const col = ops[i] ? opCol(ops[i]) : PAL.heat;
+    const kinds = rankOps(c.ops);
+    const col = kinds.length ? opCol(kinds[0]) : PAL.heat;
     ctx.save();
     ctx.translate(i*cw + cw/2, h/2);
     ctx.rotate((rnd()-0.5)*0.16);
@@ -1976,6 +2004,11 @@ function drawStrip(path, win){
     for (let k=0;k<2;k++){
       const jx=(rnd()-0.5)*2.4, jy=(rnd()-0.5)*2.4;
       ctx.fillRect(-cw/2+1.5+jx, -h/2+3+jy, cw-3, h-6);
+    }
+    if (kinds.length > 1){                 // the other kind of work, along the bottom
+      ctx.fillStyle = opCol(kinds[1]);
+      ctx.globalAlpha = 0.34 + t2*0.4;
+      ctx.fillRect(-cw/2+1.5+(rnd()-0.5)*1.6, h/2-6.5, cw-3, 3.5);
     }
     if (t2 > 0.62){
       ctx.globalAlpha = 0.5 + t2*0.3;
@@ -2036,6 +2069,18 @@ function renderRows(){
                   tot: el.querySelector('.val b'), dl: el.querySelector('.dl'),
                   lines: el.querySelector('.lines') } };
         r.parts.fn.textContent = p.split('/').pop();
+        // Hovering a square says what that square is: the strip is a canvas, so
+        // the column is worked out from the pointer and the tip written onto the
+        // canvas itself. Over an empty square the attribute goes away again, and
+        // the row's own tooltip takes over — closest() finds it either way.
+        r.cv.addEventListener('mousemove', (e)=>{
+          const box = r.cv.getBoundingClientRect();
+          const i = Math.floor((e.clientX - box.left) / (box.width / COLS));
+          const c = r.detail && r.detail[i];
+          if (c && c.n) r.cv.dataset.tip = stripTip(p, c);
+          else delete r.cv.dataset.tip;
+        });
+        r.cv.addEventListener('mouseleave', ()=>{ delete r.cv.dataset.tip; });
         rowEls.set(p, r);
       }
       r.parts.dot.style.color = opCol(domOp(s.ops));
