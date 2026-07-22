@@ -1197,10 +1197,11 @@ function applyEvent(ev, silent, replay){
     // back whole on the next frame — half rubbed out, then instantly there
     // again. It is live, so it should come back; it should come back the way it
     // arrived the first time, drawn on. Restarting the stroke's clock does that.
-    if (held === mark && Date.now() - mark.ts > NOW_MS - ERASE_MS) mark.born = Date.now();
+    if (held === mark && Date.now() > dieAt(mark) - ERASE_MS) mark.born = Date.now();
     // forward only: a flush can deliver an older event after a newer one, and a
     // mark whose clock walked backwards would expire early
     mark.ts = Math.max(mark.ts || 0, stamp); mark.op = ev.op;
+    mark.seen = Date.now();          // arrival, which only ever sets the floor
     mark.agent = ev.agent;
     // and the arrow follows the newest, which is no longer "whatever landed last"
     if (!S.now || stamp >= S.now.ts) S.now = mark;
@@ -1614,14 +1615,31 @@ function tagParts(kind, v){
   if (v.minus) out.push({ text: '−' + v.minus, col: PAL.del });
   return out;
 }
-const liveAt = (p) => { const n = S.live && S.live.get(p); return n && Date.now()-n.ts < NOW_MS ? n : null; };
+// When a mark is done with. Twenty seconds from when the work happened — except
+// that the work can reach this page long after it happened, and a mark measured
+// only from the event's own clock would be born expired.
+//
+// Measured outside this tool entirely, by polling the transcript's size every
+// 100ms: a main-agent tool call reaches the disk p50 6.2s and p90 19.9s after
+// the record says it happened, in bursts — four of eight inside 310ms, the rest
+// between 6 and 20 seconds. Subagents arrive in ~150ms, so this is the single
+// most common case, not the rare one: one agent working on its own. Timing the
+// mark purely from ev.ts gave those calls a fraction of a second on screen, and
+// anything past twenty seconds nothing at all.
+//
+// So: the event's own clock decides how old the mark is and where it sorts, and
+// arrival only sets a floor under how long it can be seen. Long enough to
+// outlast one step of an agent's work, which was measured at p50 2.3s.
+const MIN_LIFE = 6000;
+const dieAt = (n) => Math.max(n.ts + NOW_MS, (n.seen || n.ts) + MIN_LIFE);
+const liveAt = (p) => { const n = S.live && S.live.get(p); return n && Date.now() < dieAt(n) ? n : null; };
 function isNow(p){ return !!liveAt(p); }
 // Newest first, so the arrow and the drawing order agree. Broken by path when
 // two marks share a timestamp: without it the sort is unstable between frames
 // and marks trade places, which reads as a flicker on the busiest moment of a
 // fan-out — the one moment the panel exists for.
 const liveNow = () => !S.live ? []
-  : [...S.live.values()].filter(n => Date.now()-n.ts < NOW_MS)
+  : [...S.live.values()].filter(n => Date.now() < dieAt(n))
       .sort((a,b) => (b.ts - a.ts) || String(a.file).localeCompare(String(b.file)));
 function isWarm(fs){ return !!(fs.lastT && Date.now()-fs.lastT < WARM_MS); }
 /* ══ live marks — crayon, and never the same twice ══
@@ -1633,7 +1651,8 @@ function isWarm(fs){ return !!(fs.lastT && Date.now()-fs.lastT < WARM_MS); }
 const SPLAT_MS = 900;
 const ERASE_MS = 1500;      // a highlight is rubbed out, never faded
 const LIVE_DPR = () => Math.min(devicePixelRatio || 1, 2);
-const nowAge   = () => (S && S.now) ? Date.now() - S.now.ts : Infinity;
+// how much of the newest mark's life is left, which is what keeps the loop going
+const nowLeft = () => (S && S.now) ? dieAt(S.now) - Date.now() : -1;
 // one seed per 100ms tick: the same shape, re-drawn slightly differently
 
 // The canvas hangs out past its panel on every side, so an arrow or a label
@@ -1878,7 +1897,7 @@ const labelSide = (r, w, wide) => {
 // Three bands is enough to pull them apart without needing the headroom six
 // would: adjacent arrows are never on the same line.
 const RISE = 20, BANDS = 3;
-function pointAt(c, r, w, seed, alpha, mark, col, word, code, band){
+function pointAt(c, r, w, seed, alpha, mark, col, word, codes, band){
   const HAND = (css().getPropertyValue('--hand').trim() || 'cursive');
   // Who *and* what. The code was briefly allowed to replace the word, on the
   // reasoning that the highlighter colour already says whether this is a read or
@@ -1886,9 +1905,26 @@ function pointAt(c, r, w, seed, alpha, mark, col, word, code, band){
   // main is doing, and the payload beside it is empty whenever the result has
   // not come back yet, so the whole gesture went blank. Identity was meant to be
   // added, not traded for. The word costs about 34px next to a code.
-  const say = code ? code + ' ' + word : word;
-  // measured before anything is drawn, because it decides which way this goes
+  //
+  // How many names fit is decided by measuring, not by counting to three. The
+  // word is a different length in every language the page speaks — measured in
+  // the bundled fonts, the Japanese form is 14% wider than the English and 20%
+  // wider than the Korean — so a fixed count of names is a different label width
+  // in each of them, and "three names" is only ever right for one.
   c.save(); c.font = '700 16px ' + HAND;
+  let say = word;
+  if (codes && codes.length){
+    const budget = Math.max(150, Math.min(330, w * 0.34));
+    let out = codes[0], n = 1;
+    while (n < codes.length){
+      const more = codes.length - (n + 1);
+      const test = out + ' ' + codes[n] + (more ? ' +' + more : '') + ' ' + word;
+      if (c.measureText(test).width > budget) break;
+      out += ' ' + codes[n]; n++;
+    }
+    const left = codes.length - n;
+    say = out + (left > 0 ? ' +' + left : '') + ' ' + word;
+  }
   const tw = c.measureText(say).width;
   c.restore();
   const left = labelSide(r, w, tw + 46);        // the label, and room for its tag
@@ -2004,8 +2040,10 @@ function splat(c, x, y, seed, k, col){
   c.restore();
 }
 
-// how far into being rubbed out a mark is, given how long it lives
-const rubK = (age, life) => (age - (life - ERASE_MS)) / ERASE_MS;
+// how far into being rubbed out a mark is: the last ERASE_MS of whatever life
+// it turned out to have, which is not the same for every mark once a late
+// arrival can put a floor under one
+const rubK = (n) => (Date.now() - (dieAt(n) - ERASE_MS)) / ERASE_MS;
 // Everything the mark occupies, so the rubber takes the whole thing and not just
 // the ring. Which is not the same box for every mark: only a mark with an arrow
 // on it needs the room the arrow and its label take up. Sized for all of them,
@@ -2111,8 +2149,9 @@ function drawLive(){
       byFile.set(ar.file, { op: ar.op, codes: [], band: byFile.size });   // newest first
     byFile.get(ar.file).codes.push(shortAgent(ar.name));
   }
-  const label = (v) => solo ? null
-    : v.codes.slice(0, 3).join(' ') + (v.codes.length > 3 ? ' +' + (v.codes.length - 3) : '');
+  // the names go to the arrow whole; how many of them fit is its business,
+  // because only it knows the font and the room
+  const label = (v) => solo ? null : v.codes;
 
   // The panels are cleared by fitLive, so they are set up once and every live
   // file draws into them.
@@ -2132,13 +2171,16 @@ function drawLive(){
   const now = Date.now();
   const state = (n) => {
     const arw = byFile.get(n.file);             // whoever is on this file, if anyone still is
-    const age = now - n.ts;                     // since the last call: decides the rubber
+    const age = now - (n.seen || n.ts);         // since it reached this page
     const drawn = now - (n.born || n.ts);       // since the stroke: decides the drawing on
     return {
       n, age, arw,
+      // the specks an edit throws off are an arrival, like the stroke itself —
+      // timed from ev.ts they never played for anything that reached the page
+      // more than a second after it happened
       editing: n.op === 'edit' && age < SPLAT_MS,
       prog: REDUCED ? 1 : Math.min(1, drawn / DRAW_MS),
-      k: rubK(age, NOW_MS),
+      k: rubK(n),
       col: opInk(n.op),
       seed: (what) => hash(n.id + what),        // steady for this mark
       // the arrow speaks for the newest agent on the file, in that agent's
@@ -2217,10 +2259,10 @@ function drawLive(){
 let boilT = null;
 function kickBoil(){
   drawLive();
-  if (REDUCED || boilT || nowAge() >= NOW_MS) return;
+  if (REDUCED || boilT || nowLeft() <= 0) return;
   boilT = setInterval(() => {
     drawLive();
-    if (nowAge() >= NOW_MS){ clearInterval(boilT); boilT = null; }
+    if (nowLeft() <= 0){ clearInterval(boilT); boilT = null; }
   }, 50);      // frame step: fast enough for the rubber to move
 }
 
@@ -3329,10 +3371,10 @@ setInterval(()=>{                       // let the live marks fade on their own 
   const now = Date.now();
   let dropped = false;
   for (const [file, n] of S.live)
-    if (now - n.ts > NOW_MS){ S.live.delete(file); dropped = true; }
+    if (now >= dieAt(n)){ S.live.delete(file); dropped = true; }
   if (!dropped) return;
   // S.now is the newest of them, so it expires last: once it is gone nothing is live
-  if (S.now && now - S.now.ts > NOW_MS) S.now = null;
+  if (S.now && now >= dieAt(S.now)) S.now = null;
   document.querySelectorAll('.mc.now').forEach(e=>{
     if (!isNow(e.dataset.path)) e.classList.remove('now');
   });
