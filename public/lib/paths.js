@@ -31,16 +31,21 @@ export function shortDir(d, keep) {
 // that did share it, and measured across real sessions it came out empty every
 // time. So it is the longest prefix most of them share, and a directory outside
 // it simply keeps its whole name — stripRoot already leaves those alone.
+// Absolute paths count too. Claude Code records the directory it was started in,
+// and work above that stays absolute — run it in a repo's bin/ and the whole of
+// lib/, public/ and test/ arrives as /home/…/project/lib and friends. Skipping
+// those left the common prefix empty exactly when it was needed most.
 export function computeRoot(dirs, share = 0.6) {
-  const rel = dirs.filter(d => d && !d.startsWith('(') && !d.startsWith('/'));
-  if (rel.length < 2) return '';
-  const need = Math.max(2, Math.ceil(rel.length * share));
+  const usable = dirs.filter(d => d && !d.startsWith('('));
+  if (usable.length < 2) return '';
+  const need = Math.max(2, Math.ceil(usable.length * share));
 
   const seen = new Map();                  // prefix -> how many directories are under it
-  for (const d of rel) {
+  for (const d of usable) {
+    const abs = d.startsWith('/');
     const seg = d.split('/').filter(Boolean);
     for (let i = 1; i <= seg.length; i++) {
-      const pre = seg.slice(0, i).join('/');
+      const pre = (abs ? '/' : '') + seg.slice(0, i).join('/');
       seen.set(pre, (seen.get(pre) || 0) + 1);
     }
   }

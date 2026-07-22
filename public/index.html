@@ -1591,10 +1591,12 @@ function fogTree(){
   }
   // Sorted as one list, because the labels below only print what changed from the
   // row above — which is only readable if siblings actually sit next to each other.
-  // Directories touched outside the project sort to the end, where they get folded.
-  const outside = (d) => d.startsWith('/') || d.startsWith('(') ? 1 : 0;
+  // Sorted on what a row will actually show, not on the raw path: with the work
+  // above the recorded directory those are absolute, and sorting them raw would
+  // file lib/ and public/ apart from everything they belong with.
+  const key = (d) => d.startsWith('(') ? '￿' + d : stripRoot(d);
   return base.concat([...extra.entries()])
-    .sort((a, b) => outside(a[0]) - outside(b[0]) || a[0].localeCompare(b[0]));
+    .sort((a, b) => key(a[0]).localeCompare(key(b[0])));
 }
 function updateFog(){
   const box = $('fogMap');
@@ -1649,9 +1651,21 @@ function updateFog(){
     return { indent: i, text: seg.slice(i).join('/') };
   };
 
-  for (const [dir, names] of fogTree()){
+  // Outside means "absolute, and not under the prefix the work shares" — not
+  // merely "absolute". Claude Code records the directory it started in, and work
+  // above that stays absolute: started in a repo's bin/, the whole of lib/,
+  // public/ and test/ is absolute and is the project. Folding on the path shape
+  // alone hid all of it. With no shared prefix to judge against, nothing folds.
+  const tree = fogTree();
+  const away = (d) => !!ROOT && d.startsWith('/') && !d.startsWith(ROOT + '/') && d !== ROOT;
+  const awayRows = tree.filter(([d]) => away(d) && (hitsByDir.get(d) || []).length).length;
+  const touchedRows = tree.filter(([d]) => (hitsByDir.get(d) || []).length).length;
+  // and never fold away most of what there is to look at
+  const folding = awayRows > 0 && awayRows <= touchedRows * 0.4;
+
+  for (const [dir, names] of tree){
     const hits = hitsByDir.get(dir) || [];
-    if (dir.startsWith('/')){                    // outside the project
+    if (folding && away(dir)){
       if (hits.length){ outFiles += hits.length; outDirs.push(dir+'/'); }
       else { quietFiles += names.length; quietDirs.push(dir+'/'); }
       continue;

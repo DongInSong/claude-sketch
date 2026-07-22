@@ -53,6 +53,20 @@ test('computeRoot(): one stray folder does not cost everyone else their prefix',
   assert.equal(stripRoot('.playwright-mcp', computeRoot(dirs)), '.playwright-mcp');
 });
 
+test('computeRoot(): absolute directories count — work above the recorded folder', () => {
+  // Claude Code records the directory it was started in. Started in a repo's
+  // bin/, everything above it arrives absolute — and skipping those left the
+  // prefix empty exactly when the whole project depended on it.
+  const dirs = [
+    '/home/me/project/lib', '/home/me/project/public', '/home/me/project/public/lib',
+    '/home/me/project/test', '/home/me/project/tools', '/tmp/scratch',
+  ];
+  const root = computeRoot(dirs);
+  assert.equal(root, '/home/me/project');
+  assert.equal(stripRoot('/home/me/project/public/lib', root), 'public/lib');
+  assert.equal(stripRoot('/tmp/scratch', root), '/tmp/scratch', 'genuinely elsewhere keeps its name');
+});
+
 test('computeRoot(): a genuine even split still hides nothing', () => {
   assert.equal(computeRoot(['src/a', 'src/b', 'test/c', 'test/d']), '',
     'neither half is most of it, so there is no honest prefix to pull out');
