@@ -995,6 +995,12 @@ function applyEvent(ev, silent, replay){
         v.plus = (v.plus || 0) + (ev.plus || 0);
         v.minus = (v.minus || 0) + (ev.minus || 0);
       });
+    // delete before set, so the key moves to the back of the Map: setting an
+    // existing key leaves it where it first went in, and the eviction below
+    // takes the front one. Without this the busiest file — the one being
+    // touched over and over — keeps its original place and is the first thing
+    // thrown out, while a file touched once and never again sits there safe.
+    S.live.delete(ev.file);
     S.live.set(ev.file, S.now);
     if (S.live.size > LIVE_MAX) S.live.delete(S.live.keys().next().value);
   }
