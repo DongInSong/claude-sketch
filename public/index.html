@@ -523,6 +523,7 @@ const I18N = {
     quietBand: '⋯⋯ {n} quiet files · {m} folder(s) ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
     coverageCapped: '{a} / {b} · only the first {b} of {n} files are counted',
+    coverageElsewhere: '{a} / {b} · {n} more files, worked on outside this project',
     noActivity: 'no activity yet',
     nRereadT: '<u>{f}</u> read {n}× — probably already in context',
     nRereadW: 'likely duplicated context',
@@ -593,6 +594,7 @@ const I18N = {
     quietBand: '⋯⋯ 조용한 파일 {n}개 · 폴더 {m}개 ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
     coverageCapped: '{a} / {b} · {n}개 중 앞 {b}개만 셈',
+    coverageElsewhere: '{a} / {b} · 이 프로젝트 밖에서 {n}개 더 작업',
     noActivity: '아직 활동 없음',
     nRereadT: '<u>{f}</u> {n}번이나 다시 읽음 — 이미 컨텍스트에 있을 텐데',
     nRereadW: '중복 컨텍스트 소비 추정',
@@ -663,6 +665,7 @@ const I18N = {
     quietBand: '⋯⋯ 静かなファイル {n} 件 · フォルダ {m} 件 ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
     coverageCapped: '{a} / {b} · {n} 件中 先頭 {b} 件のみ集計',
+    coverageElsewhere: '{a} / {b} · このプロジェクト外で {n} 件',
     noActivity: 'まだ動きがありません',
     nRereadT: '<u>{f}</u> を {n} 回読み直し — すでにコンテキストにあるかも',
     nRereadW: '文脈の重複消費とみられます',
@@ -733,6 +736,7 @@ const I18N = {
     quietBand: '⋯⋯ 安静文件 {n} 个 · 文件夹 {m} 个 ⋯⋯',
     coverage: '{a} / {b} ({p}%)',
     coverageCapped: '{a} / {b} · 共 {n} 个文件，仅统计前 {b} 个',
+    coverageElsewhere: '{a} / {b} · 另有 {n} 个在本项目之外',
     noActivity: '还没有活动',
     nRereadT: '<u>{f}</u> 重读 {n} 次 · 多半已在上下文里',
     nRereadW: '疑似重复消耗上下文',
@@ -1042,7 +1046,7 @@ function openTarget(p, ev){
   askYes.focus();
 }
 function doOpen(p){
-  fetch('/api/open' + q(), {method:'POST', headers:{'content-type':'application/json'},
+  fetch('/api/open' + q(S ? {session: S.id} : {}), {method:'POST', headers:{'content-type':'application/json'},
     body: JSON.stringify({path: p})})
     .then(r=>r.json())
     .then(r=>{ flash(r.ok ? t('openDone', {f: p.split('/').pop()}) : t('openFail', {e: r.error||'?'})); })
@@ -1154,7 +1158,7 @@ async function loadMeta(){
 }
 async function loadUniverse(){
   try{
-    const u = await api('/api/universe' + q());
+    const u = await api('/api/universe' + q(S ? {session: S.id} : {}));
     const dirs = new Map();
     for (const p of u.files){
       const d = dirOf(p);
@@ -1197,6 +1201,10 @@ function selectSession(id){
   rowEls.clear();
   $('ticker').textContent = t('connecting');
   renderSessLinks();
+  // The file list belongs to the session, not the folder: one folder can hold a
+  // hundred sessions and a few of them worked somewhere else entirely. Boot
+  // fetches it before there is a session to name, so ask again now there is.
+  loadUniverse().then(()=>{ if (S && S.id === id && S.ready) renderAll(); });
   ES = new EventSource('/events' + q({session: id}));
   ES.onmessage = (m) => {
     let d; try{ d = JSON.parse(m.data); }catch(e){ return; }
@@ -1913,9 +1921,18 @@ function updateFog(){
   box.replaceChildren(frag);
   const total = UNIVERSE ? UNIVERSE.total : 0;
   const inU = UNIVERSE ? [...S.files.keys()].filter(p=>UNIVERSE.set.has(p)).length : S.files.size;
+  // A session can be recorded against one folder and spend itself in another —
+  // told to move to a worktree, or writing somewhere that belongs to no
+  // repository at all. Then almost nothing it touched is in this file list and
+  // the percentage says 0%, which reads as "it looked at nothing" rather than
+  // "it was looking somewhere else". Say the second thing; the header above
+  // already names where.
+  const touched = S.files.size;
+  const strayed = touched >= 4 && inU / touched < 0.3;
   // A truncated file list makes the denominator arbitrary, so the percentage
   // would be a confident lie — show the count and say what it is counting.
   $('cov').textContent = !total ? ''
+    : strayed ? t('coverageElsewhere', {a:inU, b:total, n:touched - inU})
     : UNIVERSE.truncated ? t('coverageCapped', {a:inU, b:total, n:UNIVERSE.listed})
     : t('coverage', {a:inU, b:total, p:Math.round(inU/total*100)});
 }

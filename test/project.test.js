@@ -114,6 +114,58 @@ test('a session started below its repository still sees the whole of it', (t) =>
   });
 });
 
+// Claude Code fixes the transcript folder from the directory it started in and
+// never moves it, so "go and work in the other worktree" leaves the record in one
+// place and the work in another.
+test('a session that went to work elsewhere is read against where it went', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-stray-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const mkRepo = (name, files) => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-' + name + '-'));
+    t.after(() => fs.rmSync(r, { recursive: true, force: true }));
+    const git = (...a) => execFileSync('git', ['-C', r, ...a], { stdio: 'ignore',
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+    git('init', '-q');
+    git('config', 'user.email', 'p@e'); git('config', 'user.name', 'p');
+    for (const f of files) {
+      fs.mkdirSync(path.join(r, path.dirname(f)), { recursive: true });
+      fs.writeFileSync(path.join(r, f), '//\n');
+    }
+    git('add', '-A'); git('commit', '-qm', 'i');
+    return fs.realpathSync(r);
+  };
+  const started = mkRepo('here', ['a.js']);
+  const went = mkRepo('there', ['src/one.js', 'src/two.js', 'lib/three.js']);
+
+  const dir = path.join(home, 'projects', slugOf(started));
+  fs.mkdirSync(dir, { recursive: true });
+  const line = (fp) => JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { id: 'm' + fp, model: 'opus',
+      content: [{ type: 'tool_use', id: 't' + fp, name: 'Read', input: { file_path: fp } }] } }) + '\n';
+  // one touch at home, and the rest of the session spent in the other repository,
+  // spread over its folders the way real work is
+  fs.writeFileSync(path.join(dir, 'moved.jsonl'),
+    line(path.join(started, 'a.js'))
+    + ['src/one.js', 'src/two.js', 'lib/three.js'].map(f => line(path.join(went, f))).join(''));
+  fs.writeFileSync(path.join(dir, 'stayed.jsonl'), line(path.join(started, 'a.js')));
+
+  const p = new Project(started);
+  assert.equal(p.baseFor('moved'), went, 'followed the work');
+  assert.equal(p.baseFor('stayed'), started, 'nothing to follow, so it stays');
+
+  return p.universe('moved').then(u => {
+    assert.deepEqual(u.files.slice().sort(), ['lib/three.js', 'src/one.js', 'src/two.js'],
+      'the file list is the repository the session actually worked in');
+  });
+});
+
 test('without a repository the folder is the whole of it', (t) => {
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-plain-'));
   t.after(() => fs.rmSync(plain, { recursive: true, force: true }));
