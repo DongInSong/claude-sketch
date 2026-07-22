@@ -387,7 +387,6 @@
     opacity:.55;margin:0 2px}
   #fogLegend .sep{padding:0 3px}
   .mc.warm{outline:2px solid color-mix(in srgb, var(--accent) 45%, transparent);outline-offset:2px}
-  .mc.now{outline:none}          /* the scribble on the overlay does the shouting now */
 
   /* live marks — one transparent canvas per panel, drawn over the top so the
      scribble can boil without redrawing anything underneath it */
@@ -1646,8 +1645,6 @@ function tagParts(kind, v){
 // outlast one step of an agent's work, which was measured at p50 2.3s.
 const MIN_LIFE = 6000;
 const dieAt = (n) => Math.max(n.ts + NOW_MS, (n.seen || n.ts) + MIN_LIFE);
-const liveAt = (p) => { const n = S.live && S.live.get(p); return n && Date.now() < dieAt(n) ? n : null; };
-function isNow(p){ return !!liveAt(p); }
 // Newest first, so the arrow and the drawing order agree. Broken by path when
 // two marks share a timestamp: without it the sort is unstable between frames
 // and marks trade places, which reads as a flicker on the busiest moment of a
@@ -1656,18 +1653,31 @@ const liveNow = () => !S.live ? []
   : [...S.live.values()].filter(n => Date.now() < dieAt(n))
       .sort((a,b) => (b.ts - a.ts) || String(a.file).localeCompare(String(b.file)));
 function isWarm(fs){ return !!(fs.lastT && Date.now()-fs.lastT < WARM_MS); }
-/* ══ live marks — crayon, and never the same twice ══
+/* ══ live marks — crayon ══
    Everything the eye should snap to is drawn by hand on an overlay canvas:
    a scribbled loop, an arrow, a highlighter swipe, ink flecks off an edit.
-   Redrawn ten times a second with a fresh seed, so the lines keep crawling the
-   way a pencil animation does — that boil, not the colour, is what reads as
-   "this is happening right now". */
+
+   This used to claim the lines keep crawling — a fresh seed ten times a second,
+   the boil of a pencil animation, and that boil rather than the colour being
+   what reads as "this is happening right now". None of that is true and it never
+   was. A mark's seed is its own and does not change, and prog reaches 1 after
+   DRAW_MS, so from 340ms until its twenty seconds are up every frame of a
+   highlighter is identical to the last. What actually moves is the arrow and its
+   label, which shake; the tag, which is flicked when its number changes; and the
+   rubber at the end. The stroke drawing itself on is the arrival; after that a
+   mark simply sits there, and the panel is none the worse for it.
+
+   Worth knowing before optimising: the redraw is real work — 20fps across three
+   panels — but it is small, 536µs a frame with 96 marks and 8 arrows up, so
+   there is no pressing reason to cache what does not change. And worth knowing
+   before adding the boil for real: 32 marks all crawling at once is a different
+   picture from one, and that is a decision to make on screen rather than from
+   the comment that used to describe it. */
 const SPLAT_MS = 900;
 const ERASE_MS = 1500;      // a highlight is rubbed out, never faded
 const LIVE_DPR = () => Math.min(devicePixelRatio || 1, 2);
 // how much of the newest mark's life is left, which is what keeps the loop going
 const nowLeft = () => (S && S.now) ? dieAt(S.now) - Date.now() : -1;
-// one seed per 100ms tick: the same shape, re-drawn slightly differently
 
 // The canvas hangs out past its panel on every side, so an arrow or a label
 // parked at the edge is drawn in the margin instead of being sliced off.
@@ -2451,8 +2461,15 @@ function updateFog(){
         el.dataset.tip = fileTip(p, fs, true);
         el.dataset.path = p;                 // drawLive matches its marks to cells by this
         el.classList.add('openable');
-        if (isNow(p)) el.classList.add('now');
-        else if (isWarm(fs)) el.classList.add('warm');
+        // A cell wears the quiet ring for as long as it has been touched
+        // lately, live or not. There used to be a .now class here that
+        // suppressed it, kept in step by a sweep on its own timer — which meant
+        // a cell that had just stopped being live wore no ring at all until the
+        // next render, and one that went live between renders wore the ring and
+        // a crayon mark at once. The mark is drawn from S.live, which is the
+        // only thing that actually knows; a second copy of that answer in the
+        // DOM was one too many.
+        if (isWarm(fs)) el.classList.add('warm');
         if (fs.gone) el.classList.add('gone');
         if (fs.errs) el.classList.add('err');
         el.addEventListener('click', (e)=> openTarget(p, e));
@@ -3408,9 +3425,6 @@ setInterval(()=>{                       // let the live marks fade on their own 
   if (!dropped) return;
   // S.now is the newest of them, so it expires last: once it is gone nothing is live
   if (S.now && now >= dieAt(S.now)) S.now = null;
-  document.querySelectorAll('.mc.now').forEach(e=>{
-    if (!isNow(e.dataset.path)) e.classList.remove('now');
-  });
   drawLive();
 }, 1000);
 setInterval(loadSessions, 10000);   // keeps the live/done badges honest
