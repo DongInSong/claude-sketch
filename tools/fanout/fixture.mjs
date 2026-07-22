@@ -5,18 +5,24 @@
 // files wear a mark — and none of that depends on the files being big. It does
 // depend on them being cheap, because every read costs the workers tokens.
 //
-//   node tools/fanout/fixture.mjs [dir]      (default: ./fanout-fixture)
+//   node tools/fanout/fixture.mjs [dir] [count]     (default: ./fanout-fixture, 30)
+//
+// The count is a ceiling on how many files can be live at once, so it decides
+// whether a run can reach the mark cap at all. Thirty is enough to watch the
+// arrow; to see the cap bite, and to see what it says when it does, it has to be
+// comfortably more than LIVE_MAX.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(process.argv[2] || 'fanout-fixture');
+const N = Number(process.argv[3] || 30);
 const DIRS = ['core', 'util', 'net'];
 
 fs.rmSync(root, { recursive: true, force: true });
 for (const d of DIRS) fs.mkdirSync(path.join(root, d), { recursive: true });
 
-for (let i = 0; i < 30; i++) {
+for (let i = 0; i < N; i++) {
   const d = DIRS[i % DIRS.length];
   const name = `mod${String(i).padStart(2, '0')}.js`;
   fs.writeFileSync(path.join(root, d, name), [
@@ -35,6 +41,6 @@ for (let i = 0; i < 30; i++) {
   ].join('\n'));
 }
 
-console.log(`fixture ready: ${root} — ${DIRS.length} dirs, 30 files`);
+console.log(`fixture ready: ${root} — ${DIRS.length} dirs, ${N} files`);
 console.log('re-run this between waves: the workers edit VERSION, and an edit');
 console.log('that no longer matches is an edit that never reaches the page.');

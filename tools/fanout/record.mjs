@@ -36,10 +36,27 @@ if (!dir) { console.error(`no transcript for ${ID} under ${BASE}`); process.exit
 
 const sess = new Session({ id: ID, dir, root: process.cwd() });
 
-// prime past the backlog: start every transcript that already exists at its
-// current end, so only what happens from now on is recorded
-const main = path.join(dir, ID + '.jsonl');
-try { sess.tails.set(main, { offset: fs.statSync(main).size, rest: '', agent: 'main' }); } catch { /* not yet */ }
+// Prime past the backlog: start every transcript that already exists at its
+// current end, so only what happens from now on is recorded.
+//
+// Every transcript, not just the main one. Priming main alone left the subagent
+// files at offset 0, so the first scan replayed every wave that had ever run in
+// this session — 245 reads of a fixture that had been rebuilt twice, all of them
+// reported as arriving in one flush, seconds stale. Exactly the artifact this is
+// supposed to avoid, one directory over.
+const prime = (fp, agent) => {
+  try { sess.tails.set(fp, { offset: fs.statSync(fp).size, rest: '', agent }); } catch { /* not there */ }
+};
+prime(path.join(dir, ID + '.jsonl'), 'main');
+const subRoot = path.join(dir, ID, 'subagents');
+try {
+  for (const e of fs.readdirSync(subRoot, { recursive: true })) {
+    const name = String(e);
+    if (!name.endsWith('.jsonl') || !path.basename(name).startsWith('agent-')) continue;
+    const fp = path.join(subRoot, name);
+    prime(fp, sess.label(path.basename(name).slice(6, -6), path.dirname(fp)));
+  }
+} catch { /* no subagents yet, which is the clean case */ }
 
 const out = fs.createWriteStream(path.resolve(OUT), { flags: 'w' });
 const t0 = Date.now();
