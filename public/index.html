@@ -65,16 +65,18 @@
     font-family:var(--hand); }
   [lang="zh"]{ --hand:"Excalifont","Gaegu","MaShanUI","Segoe Print","Comic Sans MS","Chalkboard SE","Marker Felt","Microsoft YaHei","PingFang SC",cursive;
     font-family:var(--hand); }
-  @media (prefers-color-scheme: dark){
-    :root{
-      color-scheme: dark;
-      --paper:#2A2A26; --paper2:#232320; --grain:rgba(240,235,215,.04);
-      --ink:#EDE8DA; --ink2:#B5AE9C; --ink3:#7E7867;
-      --accent:#E08B6D; --heat:#E08B6D;
-      --op-read:#3987e5; --op-grep:#9085e9; --op-edit:#199e70; --op-bash:#c98500;
-      --good:#4cae66; --warn:#d9a53e; --bad:#e66767;
-      --gold1:#E8C071; --gold2:#FFE9A8; --gold3:#C79236;
-    }
+  /* Keyed on the attribute rather than on the media query, so there is one dark
+     palette and not a copy of it per way of arriving at dark. The attribute is
+     stamped in <head> before anything paints — the page is drawn by script from
+     end to end, so there is no version of it that runs without one. */
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --paper:#2A2A26; --paper2:#232320; --grain:rgba(240,235,215,.04);
+    --ink:#EDE8DA; --ink2:#B5AE9C; --ink3:#7E7867;
+    --accent:#E08B6D; --heat:#E08B6D;
+    --op-read:#3987e5; --op-grep:#9085e9; --op-edit:#199e70; --op-bash:#c98500;
+    --good:#4cae66; --warn:#d9a53e; --bad:#e66767;
+    --gold1:#E8C071; --gold2:#FFE9A8; --gold3:#C79236;
   }
 
   *{box-sizing:border-box}
@@ -94,8 +96,49 @@
   .hline{height:2.5px;background:var(--ink3);border-radius:99px;opacity:.5;margin:24px 0;filter:url(#squiggle)}
 
   header{display:flex;align-items:flex-start;gap:12px}
-  h1{font-size:32px;margin:0;letter-spacing:.01em}
-  h1 .spark{color:var(--accent);display:inline-block;transform:rotate(-8deg)}
+  h1{font-size:32px;margin:0;letter-spacing:.01em;position:relative}
+  /* what the mark just did, shouted over its own head and gone again. Absolute,
+     so a long word in any language cannot shove the title along. */
+  /* Above the mark, in the sheet's own top margin — the only clear space next to
+     it, since the title runs off to the right. It springs upward, so it is set
+     low enough that the top of the spring still clears the top of the page. */
+  .sparksay{position:absolute;left:-5px;top:-13px;z-index:6;pointer-events:none;
+    transform-origin:20% 100%;
+    font-size:14.5px;font-weight:700;line-height:1.2;white-space:nowrap;
+    color:var(--accent);background:var(--paper);padding:1px 8px;opacity:0;
+    border-radius:10px 14px 11px 15px / 14px 11px 15px 10px;
+    box-shadow:0 0 0 1.7px color-mix(in srgb, var(--accent) 42%, transparent)}
+  /* The spring belongs to the arrival only. Left to run the whole way it drags
+     the opacity down with it and the word is gone in half a second, before it
+     can be read — so it is held up until the end and the easing is per step. */
+  .sparksay.say{animation:sparksay 1.7s forwards}
+  @keyframes sparksay{
+    0%{opacity:0;transform:translateY(8px) scale(.5) rotate(-16deg);
+      animation-timing-function:cubic-bezier(.2,1.5,.4,1)}
+    18%{opacity:1;transform:translateY(-4px) scale(1.14) rotate(7deg);
+      animation-timing-function:ease-out}
+    32%{opacity:1;transform:translateY(0) scale(1) rotate(-5deg)}
+    44%{opacity:1;transform:translateY(-2px) scale(1.04) rotate(-1deg)}
+    58%{opacity:1;transform:translateY(0) scale(1) rotate(-4deg)}
+    74%{opacity:1;transform:translateY(0) scale(1) rotate(-4deg);
+      animation-timing-function:ease-in}
+    100%{opacity:0;transform:translateY(-9px) scale(.97) rotate(-4deg)}
+  }
+  @keyframes sparksayQuiet{0%,84%{opacity:1}100%{opacity:0}}
+  @media (prefers-reduced-motion: reduce){
+    .sparksay.say{animation:sparksayQuiet 1.7s linear forwards}
+  }
+  /* the mark is the switch: it already sits where a theme control would go, and
+     it is the one thing on the page that is drawn in ink rather than written */
+  h1 .spark{color:var(--accent);display:inline-block;transform:rotate(-8deg);
+    font:inherit;line-height:1;vertical-align:baseline;
+    transition:transform .25s ease, color .25s ease}
+  h1 button.spark:hover{color:var(--heat);transform:rotate(-8deg) scale(1.14)}
+  h1 button.spark:active{transform:rotate(-26deg) scale(1.02)}
+  @media (prefers-reduced-motion: reduce){
+    h1 .spark{transition:none}
+    h1 button.spark:hover,h1 button.spark:active{transform:rotate(-8deg)}
+  }
   h1 .lt{color:var(--accent)}
   .tag{margin:0;color:var(--ink3);font-size:15px}
   .topctl{margin-left:auto;display:flex;gap:14px;align-items:center;padding-top:6px}
@@ -390,6 +433,21 @@
 
   footer{margin-top:30px;color:var(--ink3);font-size:13.5px}
 </style>
+<script>
+  /* Which palette to draw in, decided before the first paint. The page's own
+     script is a module and so runs after the document is parsed, which is one
+     frame too late: a stored dark would light the page up white and then snap.
+     Inline, here, is the only place that is early enough.
+     'auto' is stored as nothing at all, so a machine that has never touched the
+     mark keeps following the system, which is what it did before there was one. */
+  (function () {
+    var want = null;
+    try { want = localStorage.getItem('cs-theme'); } catch (e) { /* private mode */ }
+    if (want !== 'light' && want !== 'dark')
+      want = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = want;
+  })();
+</script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -406,7 +464,7 @@
 <div class="sheet">
   <header>
     <div>
-      <h1><span class="spark">✳</span> claude-<span class="lt">sketch</span></h1>
+      <h1><button type="button" id="btnTheme" class="spark">✳</button><span id="sparkSay" class="sparksay" role="status"></span> claude-<span class="lt">sketch</span></h1>
       <p class="tag" data-i18n="tag"></p>
     </div>
     <div class="topctl">
@@ -493,6 +551,9 @@ const I18N = {
     dirHits: '· {n} hits',
     quietLine: '… +{n} quiet files ({h} hits) — {names}',
     quietBandTitle:'untouched folders',
+    themeAuto:'theme — following the system', themeLight:'theme — light', themeDark:'theme — dark',
+    themeTip:'click for the next one', themeLabel:'change the theme',
+    sayAuto:'as you were!', sayLight:'lights on!', sayDark:'lights out!',
     outsideBandTitle:'touched outside this project',
     outsideBand: '⋯⋯ {n} file(s) outside the project · {m} folder(s) ⋯⋯',
     lblFolders:'folders',
@@ -564,6 +625,9 @@ const I18N = {
     dirHits: '· {n}회',
     quietLine: '… 조용한 파일 {n}개 ({h}회) — {names}',
     quietBandTitle:'미접촉 폴더',
+    themeAuto:'테마 — 시스템을 따름', themeLight:'테마 — 밝게', themeDark:'테마 — 어둡게',
+    themeTip:'누르면 다음 것으로', themeLabel:'테마 바꾸기',
+    sayAuto:'알아서!', sayLight:'환하게!', sayDark:'깜깜하게!',
     outsideBandTitle:'프로젝트 밖에서 접촉',
     outsideBand: '⋯⋯ 프로젝트 밖 파일 {n}개 · 폴더 {m}개 ⋯⋯',
     lblFolders:'폴더',
@@ -635,6 +699,9 @@ const I18N = {
     dirHits: '· {n} 回',
     quietLine: '… 静かなファイル {n} 件（{h} 回）— {names}',
     quietBandTitle:'未接触フォルダ',
+    themeAuto:'テーマ — システムに従う', themeLight:'テーマ — ライト', themeDark:'テーマ — ダーク',
+    themeTip:'押すと次へ', themeLabel:'テーマを変える',
+    sayAuto:'おまかせ!', sayLight:'あかるく!', sayDark:'くらく!',
     outsideBandTitle:'プロジェクト外での接触',
     outsideBand: '⋯⋯ プロジェクト外のファイル {n} 件 · フォルダ {m} 件 ⋯⋯',
     lblFolders:'フォルダ',
@@ -706,6 +773,9 @@ const I18N = {
     dirHits: '· {n} 次',
     quietLine: '… 另有 {n} 个安静文件（{h} 次）— {names}',
     quietBandTitle:'未接触的文件夹',
+    themeAuto:'主题 — 跟随系统', themeLight:'主题 — 浅色', themeDark:'主题 — 深色',
+    themeTip:'点击切换到下一个', themeLabel:'切换主题',
+    sayAuto:'随你便!', sayLight:'亮起来!', sayDark:'暗下去!',
     outsideBandTitle:'在项目之外接触',
     outsideBand: '⋯⋯ 项目外文件 {n} 个 · 文件夹 {m} 个 ⋯⋯',
     lblFolders:'文件夹',
@@ -783,7 +853,52 @@ function readPal(){
   };
 }
 readPal();
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>{ readPal(); if (S) renderAll(); });
+
+/* ══ theme ══
+   auto → light → dark → auto. Auto is stored as nothing, so the mark has to have
+   been pressed for the system to stop being followed. The <head> script already
+   resolved it into data-theme before this file ran; everything here only has to
+   keep that attribute honest and tell the drawing code to look again. */
+const THEMES = ['auto', 'light', 'dark'];
+let THEME = (()=>{ try{ const s = localStorage.getItem('cs-theme');
+  return s === 'light' || s === 'dark' ? s : 'auto'; }catch(e){ return 'auto'; } })();
+const sysDark = matchMedia('(prefers-color-scheme: dark)');
+// what is actually on screen, which is what the canvases have to agree with
+const isDark = () => document.documentElement.dataset.theme === 'dark';
+const themeKey = () => 'theme' + THEME[0].toUpperCase() + THEME.slice(1);
+function paintThemeBtn(){
+  const b = $('btnTheme');
+  if (!b) return;
+  b.dataset.tip = tipBox(t(themeKey()), [], {note: t('themeTip')});
+  b.setAttribute('aria-label', t('themeLabel'));
+}
+// The mark says what it just did, once, beside itself. Hovering tells you the
+// same thing, but you are looking at the mark when you press it, not at a
+// tooltip that has not appeared yet.
+function sayTheme(){
+  const el = $('sparkSay');
+  if (!el) return;
+  el.textContent = t('say' + THEME[0].toUpperCase() + THEME.slice(1));
+  el.classList.remove('say');
+  void el.offsetWidth;             // restart it mid-flight rather than wait it out
+  el.classList.add('say');
+}
+function applyTheme(shout){
+  document.documentElement.dataset.theme =
+    THEME === 'auto' ? (sysDark.matches ? 'dark' : 'light') : THEME;
+  readPal();                       // the custom properties just changed under us
+  paintThemeBtn();
+  if (shout) sayTheme();
+  if (S && S.ready) renderAll();   // every mark on every canvas is the old palette
+}
+function cycleTheme(){
+  THEME = THEMES[(THEMES.indexOf(THEME) + 1) % THEMES.length];
+  try{ THEME === 'auto' ? localStorage.removeItem('cs-theme')
+                        : localStorage.setItem('cs-theme', THEME); }catch(e){}
+  applyTheme(true);
+}
+// only while nobody has chosen — once they have, the system is not consulted
+sysDark.addEventListener('change', ()=>{ if (THEME === 'auto') applyTheme(); });
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const OP_LABEL = {read:'READ', grep:'GREP', edit:'EDIT', bash:'RUN', task:'TASK', del:'DEL'};
@@ -1353,7 +1468,6 @@ function isWarm(fs){ return !!(fs.lastT && Date.now()-fs.lastT < WARM_MS); }
    "this is happening right now". */
 const SPLAT_MS = 900;
 const ERASE_MS = 1500;      // a highlight is rubbed out, never faded
-const DARK     = matchMedia('(prefers-color-scheme: dark)');
 const LIVE_DPR = () => Math.min(devicePixelRatio || 1, 2);
 const nowAge   = () => (S && S.now) ? Date.now() - S.now.ts : Infinity;
 // one seed per 100ms tick: the same shape, re-drawn slightly differently
@@ -1424,7 +1538,7 @@ function markerEdge(c, box, seed, prog, col){
   const lens = segs.map(s => Math.hypot(s[2]-s[0], s[3]-s[1]));
   let want = lens.reduce((a,b)=>a+b, 0) * prog;
   c.save();
-  c.globalCompositeOperation = DARK.matches ? 'screen' : 'multiply';
+  c.globalCompositeOperation = isDark() ? 'screen' : 'multiply';
   for (let i = 0; i < segs.length && want > 0; i++){
     const [ax, ay, bx, by] = segs[i];
     const f = Math.min(1, want/lens[i]);
@@ -1439,7 +1553,7 @@ function marker(c, box, seed, prog, col){
   const lines = Math.max(1, Math.round(box.h/(MARK_H*0.7)));   // passes overlap, as they do
   const step = box.h/lines;
   c.save();
-  c.globalCompositeOperation = DARK.matches ? 'screen' : 'multiply';
+  c.globalCompositeOperation = isDark() ? 'screen' : 'multiply';
   c.fillStyle = col;
   for (let i = 0; i < lines; i++){
     const over = 5 + rnd()*9;                                  // runs past the edges
@@ -2754,6 +2868,7 @@ function applyLang(){
   document.querySelectorAll('[data-i18n]').forEach(el=>{ el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-html]').forEach(el=>{ el.innerHTML = t(el.dataset.i18nHtml); });
   renderLangs();
+  paintThemeBtn();                // the mark's tooltip is worded too
   $('btnPause').textContent = running ? t('pause') : t('resume');
   if (S && S.ready){ renderSessLinks(); renderAll(); if (S.lastEv) renderTicker(S.lastEv); }
   else renderSessLinks();
@@ -2790,6 +2905,7 @@ $('btnPause').addEventListener('click', function(){
     if (S.lastEv) renderTicker(S.lastEv);
   }
 });
+$('btnTheme').addEventListener('click', cycleTheme);
 
 /* periodic refresh: heat fade, delta expiry, session list */
 setInterval(()=>{
