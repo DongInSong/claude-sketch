@@ -30,6 +30,26 @@ test('the page hands out a token, and the API refuses to work without it', async
   assert.equal((await fetch(`${base}/api/sessions?k=${token}`)).status, 200);
 });
 
+test('a token the right length in characters but not in bytes is refused, not fatal', async (t) => {
+  const { server, base, token } = await boot();
+  // A request that kills the handler never answers, and close() would then wait
+  // on that socket for ever — a CI job that hangs instead of one that goes red.
+  t.after(() => { server.closeAllConnections(); server.close(); });
+
+  // 32 characters, 96 bytes. Comparing the two strings' lengths let this through
+  // to timingSafeEqual, which throws when the buffers differ in length — raised
+  // inside a request handler with nothing catching it, that ended the process.
+  const wide = encodeURIComponent('한'.repeat(token.length));
+  const status = (p) => fetch(`${base}${p}`, { signal: AbortSignal.timeout(4000) })
+    .then(r => r.status, () => 'no answer — the handler threw');
+
+  assert.equal(await status(`/api/sessions?k=${wide}`), 403);
+  assert.equal(await status(`/events?session=whatever&k=${wide}`), 403);
+
+  // still serving, and still holding the one token that works
+  assert.equal(await status(`/api/sessions?k=${token}`), 200);
+});
+
 // fetch() silently drops a caller-set Host header, so this one goes out raw.
 const getAs = (port, host, p) => new Promise((resolve, reject) => {
   const req = http.request({ host: '127.0.0.1', port, path: p, headers: { host } },
