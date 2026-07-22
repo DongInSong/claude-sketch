@@ -93,6 +93,50 @@
   button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:8px}
   ::selection{background:color-mix(in srgb, var(--accent) 25%, transparent)}
 
+  /* The bar down the side was the one piece of chrome still drawn by the
+     operating system, sitting against the paper in whatever grey it liked.
+     Both spellings, and they are not additive: where a browser understands
+     scrollbar-color it uses it and ignores ::-webkit-scrollbar entirely —
+     measured here, the gutter comes out at thin's 10px rather than the 12px the
+     webkit block asks for. So the standard pair is what Chrome and Firefox
+     render, and the webkit block is there for Safari, which has only the old
+     one. Colours are palette variables either way, so the bar follows the theme
+     without anything having to tell it to.
+     No squiggle filter: it does not apply to scrollbar parts, and a pencil line
+     that stayed still while everything else boiled would look broken rather
+     than hand-drawn. A soft pencil stub is the closest honest thing. */
+  html{scrollbar-color: color-mix(in srgb, var(--ink3) 62%, transparent) transparent;
+    scrollbar-width:thin}
+  /* The crayon needs the old spelling — the standard pair can set two colours and
+     a width, and a crayon is a texture. So where ::-webkit-scrollbar is
+     understood the standard pair is handed back to auto, which is what lets the
+     rules below take effect at all; Firefox fails this test and keeps the plain
+     tinted bar above, which is the best it can be given. */
+  @supports selector(::-webkit-scrollbar){
+    html{scrollbar-color:auto;scrollbar-width:auto}
+    ::-webkit-scrollbar{width:13px;height:13px;background:transparent}
+    ::-webkit-scrollbar-track{background:transparent}
+    /* the same stroke the footprints are filled with, laid down the bar: two
+       passes of one colour at different pressures, at the angle a right hand
+       drags. Waxy rather than flat, which is the whole difference between a
+       crayon and a rule. */
+    ::-webkit-scrollbar-thumb{
+      border:3px solid transparent;background-clip:content-box;
+      border-radius:9px 7px 10px 8px / 8px 10px 7px 9px;
+      background-image:repeating-linear-gradient(115deg,
+        color-mix(in srgb, var(--ink3) 85%, transparent) 0 2px,
+        color-mix(in srgb, var(--ink3) 40%, transparent) 2px 4.5px)}
+    ::-webkit-scrollbar-thumb:hover{
+      background-image:repeating-linear-gradient(115deg,
+        color-mix(in srgb, var(--ink2) 88%, transparent) 0 2px,
+        color-mix(in srgb, var(--ink2) 45%, transparent) 2px 4.5px)}
+    ::-webkit-scrollbar-thumb:active{
+      background-image:repeating-linear-gradient(115deg,
+        color-mix(in srgb, var(--accent) 92%, transparent) 0 2px,
+        color-mix(in srgb, var(--accent) 48%, transparent) 2px 4.5px)}
+    ::-webkit-scrollbar-corner{background:transparent}
+  }
+
   .hline{height:2.5px;background:var(--ink3);border-radius:99px;opacity:.5;margin:24px 0;filter:url(#squiggle)}
 
   header{display:flex;align-items:flex-start;gap:12px}
