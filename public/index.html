@@ -1617,6 +1617,14 @@ function rubOut(c, box, seed, k){
   const cx = box.x + box.w/2, cy = box.y + box.h/2;
   const len = box.w + 80;
   c.save();
+  // The swipe deliberately runs well past the mark — that overshoot is the
+  // gesture. It is also, on a canvas that now carries every live mark at once,
+  // eighty pixels of destination-out reaching into whatever is drawn beside it.
+  // Clipped to the mark's own footprint the stroke still sweeps in from outside,
+  // and lifts only this mark's ink.
+  c.beginPath();
+  c.rect(box.x, box.y, box.w, box.h);
+  c.clip();
   c.globalCompositeOperation = 'destination-out';    // lift the ink, don't paint over it
   c.lineCap = 'round';
   c.globalAlpha = 1;
@@ -1654,11 +1662,19 @@ function splat(c, x, y, seed, k){
 
 // how far into being rubbed out a mark is, given how long it lives
 const rubK = (age, life) => (age - (life - ERASE_MS)) / ERASE_MS;
-// everything the mark occupies, arrow and label included, so the rubber takes
-// the whole thing and not just the ring
-const markBox = (r) => labelLeft(r)
-  ? { x: r.x-124, y: r.y-40, w: r.w+140, h: r.h+52 }
-  : { x: r.x-16,  y: r.y-40, w: r.w+140, h: r.h+52 };
+// Everything the mark occupies, so the rubber takes the whole thing and not just
+// the ring. Which is not the same box for every mark: only the newest one draws
+// an arrow and a label, and only it needs the room they take up. Sized for all
+// of them, the box was 162×74 around a 22px footprints cell — seven times the
+// area — and since a rubber lifts whatever is under it, the one mark on its way
+// out took its neighbours' marks with it, then let them back the moment it
+// expired and the next one started its own erase from nothing. Off by one cell
+// it would have been a smudge; at this size it read as the whole panel blinking.
+const markBox = (r, lead) => !lead
+  ? { x: r.x-16, y: r.y-10, w: r.w+32, h: r.h+20 }   // the highlighter's overshoot, no more
+  : labelLeft(r)
+    ? { x: r.x-124, y: r.y-40, w: r.w+140, h: r.h+52 }
+    : { x: r.x-16,  y: r.y-40, w: r.w+140, h: r.h+52 };
 
 const DRAW_MS = 340;                     // how long the pen takes to cross the mark
 
@@ -1703,7 +1719,7 @@ function drawLive(){
         // than leaving its second half stranded on a mark nothing is pointing at
         if (lead) pointAt(tc, r, tmHost.clientWidth, seed('tma'), 1, n);
         if (editing) splat(tc, r.x + r.w - 12, r.y + 14, seed('tm'), age/SPLAT_MS);
-        if (k > 0) rubOut(tc, markBox(r), seed('tm'), k);
+        if (k > 0) rubOut(tc, markBox(r, lead), seed('tm'), k);
       }
     }
 
@@ -1714,7 +1730,7 @@ function drawLive(){
       marker(fc, r, seed('fog'), prog, col);
       if (lead) pointAt(fc, r, fogHost.clientWidth, seed('foga'), 1, n);
       if (editing) splat(fc, r.x + r.w, r.y, seed('fog'), age/SPLAT_MS);
-      if (k > 0) rubOut(fc, markBox(r), seed('fog'), k);
+      if (k > 0) rubOut(fc, markBox(r, lead), seed('fog'), k);
     }
 
     // timeline: mark the whole row, since that is the line being read
