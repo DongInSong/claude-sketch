@@ -11,6 +11,7 @@ export function squarify(items, x, y, w, h) {
     const horiz = w >= h;
     const side = horiz ? h : w;
     const total = items.slice(i).reduce((a, b) => a + b.wt, 0);
+    if (!(total > 0)) break;      // nothing left to divide: rects would come out NaN
     const area = w * h;
     let best = Infinity, count = 1, rowSum = 0;
     for (let j = i; j < items.length; j++) {

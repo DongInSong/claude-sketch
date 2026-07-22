@@ -44,6 +44,15 @@ test('squarify(): degenerate inputs do not throw', () => {
   assert.doesNotThrow(() => squarify([{ wt: 1 }], 0, 0, 0, 0));
 });
 
+test('squarify(): weightless items get no rect rather than a NaN one', () => {
+  // dividing by a zero total produced {w: NaN, h: NaN} for the first item and no
+  // rect at all for the rest — a shape every caller would have had to guard
+  const items = [{ wt: 0 }, { wt: 0 }];
+  squarify(items, 0, 0, 100, 100);
+  for (const it of items)
+    assert.equal(it.rect, undefined, `got ${JSON.stringify(it.rect)}`);
+});
+
 test('heatScore(): recent activity outweighs the same activity earlier', () => {
   const COLS = 30;
   const now = { hb: { 100: 1 }, total: 1 };
