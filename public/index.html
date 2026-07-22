@@ -1078,7 +1078,9 @@ async function loadUniverse(){
       total: u.files.length,
       set: new Set(u.files),
     };
-  }catch(e){ UNIVERSE = {tree:[], total:0, set:new Set()}; }
+  // A failed refresh should leave what we already know on screen — blanking it
+  // would empty the fog map and drop coverage to nothing over one bad request.
+  }catch(e){ UNIVERSE = UNIVERSE || {tree:[], total:0, set:new Set()}; }
 }
 async function loadSessions(){
   try{
@@ -1125,10 +1127,17 @@ function selectSession(id){
   };
 }
 
+const RENDER_MS = 250;       // a flood of events costs one repaint, not one each
+let lastRender = 0;
 function scheduleRender(){
   if (renderQueued) return;
   renderQueued = true;
-  setTimeout(()=>{ renderQueued = false; if (S && S.ready) renderAll(); }, 250);
+  // The first event after a lull draws straight away — that is the one being
+  // watched for, and making it wait out the full window was most of what the
+  // page felt like. A burst still coalesces: the next event inside the window
+  // waits out whatever is left of it.
+  const wait = Math.max(0, RENDER_MS - (Date.now() - lastRender));
+  setTimeout(()=>{ renderQueued = false; if (S && S.ready) renderAll(); }, wait);
 }
 
 /* ══ fog map ══ */
@@ -2014,8 +2023,12 @@ function renderSessLinks(){
   const box = $('sessLinks');
   box.innerHTML = '';
   const now = Date.now();
-  const live = SESSIONS.filter(s=>s.active);
-  const rest = SESSIONS.filter(s=>!s.active);
+  // isLive, not s.active: for the session on screen "live" means its last tool
+  // call, and the badge has said so since it started reading the working state
+  // instead of the file's mtime. The ordering was still reading the mtime, so a
+  // session could sit among the finished ones wearing a live badge.
+  const live = SESSIONS.filter(s=>isLive(s));
+  const rest = SESSIONS.filter(s=>!isLive(s));
   const shown = sessExpanded ? live.concat(rest)
     : live.concat(rest.slice(0, Math.max(1, SESS_SHOWN - live.length)));
   const hidden = SESSIONS.length - shown.length;
@@ -2216,6 +2229,7 @@ function renderNoFiles(){
   else el.hidden = true;
 }
 function renderAll(){
+  lastRender = Date.now();
   ROOT = computeRoot([...S.files.keys()].map(dirOf));
   const rn = $('rootNote');
   if (ROOT){ rn.innerHTML = t('underRoot', {p: esc(ROOT)+'/'}); rn.hidden = false; }
@@ -2304,6 +2318,15 @@ setInterval(()=>{                       // let the live marker fade on its own w
   drawLive();
 }, 1000);
 setInterval(loadSessions, 10000);   // keeps the live/done badges honest
+// The file universe was read once at boot and then believed for the rest of the
+// session. Claude Code commits, deletes and switches branches while you watch —
+// git ls-files says something different afterwards, and coverage and the fog map
+// were still answering from whatever was true when the page loaded.
+setInterval(async ()=>{
+  if (OFFLINE) return;
+  await loadUniverse();
+  if (S && S.ready) renderAll();
+}, 60000);
 addEventListener('resize', ()=>{ if (S && S.ready) renderAll(); });
 
 /* ══ boot ══ */
