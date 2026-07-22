@@ -182,16 +182,32 @@ async function load() {
 const pct = (a, p) => a.length ? a.slice().sort((x, y) => x - y)[Math.min(a.length - 1,
   Math.floor(a.length * p / 100))] : 0;
 
-// The page keeps one "live" slot: the newest event wins it, whatever else is
-// going on. So a mark lasts until the next event lands on a different file —
-// which under concurrent agents can be no time at all.
+// The page marks several files at once — LIVE_MAX of them, from index.html. A
+// mark is born on its file's first event, its clock is reset by every further
+// event on the same file, and it holds NOW_MS past the last one. It can also be
+// cut short: when another distinct file goes live and the set is full, the least
+// recently touched mark is dropped to make room. A mark ends at whichever of the
+// two comes first, so both are worth reporting — a run where most marks are cut
+// rather than expiring is one where the cap, not the design, decides what is on
+// screen. (This modelled the single-slot page it used to be, which made every
+// mark look like it flashed past; it doesn't any more.)
+const LIVE_MAX = 8, NOW_MS = 20000;
 function dwell(events) {
+  const live = new Map();                 // file -> {born, ts}; insertion order is recency
   const out = [];
-  for (let i = 0; i < events.length; i++) {
-    let j = i + 1;
-    while (j < events.length && events[j].file === events[i].file) j++;
-    out.push((j < events.length ? events[j].at : events[i].at + 20000) - events[i].at);
+  for (const e of events) {
+    for (const [f, m] of live)            // anything that ran out before this event
+      if (e.at - m.ts >= NOW_MS) { out.push({ held: m.ts + NOW_MS - m.born, cut: false }); live.delete(f); }
+    const m = live.get(e.file);
+    if (m) { live.delete(e.file); m.ts = e.at; live.set(e.file, m); }   // touched: back of the queue
+    else live.set(e.file, { born: e.at, ts: e.at });
+    if (live.size > LIVE_MAX) {
+      const [f, old] = live.entries().next().value;
+      out.push({ held: e.at - old.born, cut: true });
+      live.delete(f);
+    }
   }
+  for (const m of live.values()) out.push({ held: m.ts + NOW_MS - m.born, cut: false });
   return out;
 }
 
@@ -258,16 +274,17 @@ async function check() {
   const lags = got.map(g => g.lag);
   const d = dwell(got.slice().sort((a, b) => a.at - b.at));
   const f = fronts(got.slice().sort((a, b) => a.at - b.at));
-  const flash = d.filter(x => x < 200).length;
+  const holds = d.map(x => x.held);
+  const cut = d.filter(x => x.cut).length;
 
   console.log(`\nagents ${AGENTS.length} · ${opt.rate}/s · ${opt.seconds}s`);
   console.log(`delivered        ${got.length}/${sent.size}` +
     (got.length === sent.size ? '' : `  ← ${sent.size - got.length} MISSING`));
   console.log(`lag  p50 ${pct(lags, 50)}ms · p90 ${pct(lags, 90)}ms · max ${Math.max(...lags, 0)}ms`);
   console.log(`files being worked on at once   avg ${(f.reduce((a, b) => a + b, 0) / (f.length || 1)).toFixed(1)} · max ${Math.max(...f, 0)}`);
-  console.log(`live mark holds                 p50 ${pct(d, 50)}ms · p90 ${pct(d, 90)}ms`);
-  console.log(`marks gone in under 200ms       ${flash}/${d.length}` +
-    ` (${Math.round(flash / (d.length || 1) * 100)}% — the page shows one file at a time)`);
+  console.log(`a mark holds                    p50 ${pct(holds, 50)}ms · p90 ${pct(holds, 90)}ms`);
+  console.log(`cut short by the ${LIVE_MAX}-mark cap        ${cut}/${d.length}` +
+    ` (${Math.round(cut / (d.length || 1) * 100)}% — the rest stayed their full ${NOW_MS / 1000}s)`);
 
   server.closeAllConnections();
   server.close();
