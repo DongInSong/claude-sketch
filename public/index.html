@@ -1488,33 +1488,39 @@ function flick(since){
   const rock = h * Math.sin(since / POP_HIT_MS * Math.PI * 3.4);
   return { lift: h * h * 7, tilt: rock * 0.16, grow: 1 + h * h * 0.2 };
 }
-function popUp(c, x, y, tags, alpha){
-  if (!tags || !tags.size) return;
+// One tag, for what the label is saying right now. A file read and then edited
+// keeps both counts — they are still adding up underneath, and going back to
+// reading brings the read total back — but drawing both put "145 lines" from the
+// read beside a label reading "fixing!", the two of them close enough to collide.
+const TAG_FOR = { read: 'read', edit: 'edit' };
+function popUp(c, x, y, mark, alpha){
+  const kind = mark && TAG_FOR[mark.op];
+  const v = kind && mark.tags && mark.tags.get(kind);
+  if (!v) return;
+  const parts = tagParts(kind, v);
+  if (!parts.length) return;
   const now = Date.now();
+  const GAP = 5;
   c.save();
   c.textAlign = 'left'; c.textBaseline = 'bottom';
   c.font = '700 13px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
-  let i = 0;
-  const GAP = 5;
-  for (const [kind, v] of tags){
-    const parts = tagParts(kind, v);
-    if (!parts.length) continue;
+  {
     const k = REDUCED ? 1 : Math.min(1, (now - v.at) / POP_IN_MS);
     const ease = 1 - Math.pow(1 - k, 3);
     // flicked on the way in, and again every time the count moves underneath
     const f = flick(now - v.hit);
     const widths = parts.map(p => c.measureText(p.text).width);
     const w = widths.reduce((a, b) => a + b, 0) + GAP * (parts.length - 1);
-    const rnd = mulberry(hash(kind) + i);
+    const rnd = mulberry(hash(kind));
     c.save();
     // turned about its middle, not its left end: tilting a 40px tag from one end
     // lifts the far end by the whole width times the angle, which put the "−3" of
     // a "+2 −3" through the top of the panel. About the middle it is half that,
     // and it goes down as much as it goes up.
-    c.translate(x + 10 * ease + w / 2, y - (10 + i * 15) * ease - f.lift);
+    c.translate(x + 10 * ease + w / 2, y - 10 * ease - f.lift);
     // a wider tag turns less, so however long the number gets its ends never
     // rise more than a few pixels above the middle
-    c.rotate(-Math.min(0.16, 5 / Math.max(1, w / 2)) + i * 0.06 + f.tilt);
+    c.rotate(-Math.min(0.16, 5 / Math.max(1, w / 2)) + f.tilt);
     c.scale(f.grow, f.grow);
     c.globalAlpha = (alpha ?? 1) * ease;
     paperUnder(c, -w / 2 - 3, -12, w + 6, 16, rnd, c.globalAlpha);
@@ -1525,7 +1531,6 @@ function popUp(c, x, y, tags, alpha){
       dx += widths[j] + GAP;
     });
     c.restore();
-    if (++i >= 2) break;            // two is enough beside a label
   }
   c.restore();
 }
@@ -1548,7 +1553,7 @@ const labelLeft = (r) => r.x > 70;
 // pops ride beside the label when there is one — the eye is already there — and
 // fall back to the mark's own corner for the live files that have no arrow,
 // since only the newest one gets pointed at.
-function pointAt(c, r, w, seed, alpha, pops){
+function pointAt(c, r, w, seed, alpha, mark){
   const left = labelLeft(r);
   const tx = left ? r.x-7 : r.x+r.w+7, ty = r.y + Math.min(r.h/2, 14);
   const len = 30, sx = tx + (left ? -len : len), sy = ty - len*0.8;
@@ -1591,7 +1596,7 @@ function pointAt(c, r, w, seed, alpha, pops){
   c.fillText(word, 0, 0);
   // beside the word, in the label's own frame, so the two read as one thing
   c.textAlign = 'left';
-  popUp(c, left ? 6 : tw + 6, 0, pops, alpha);
+  popUp(c, left ? 6 : tw + 6, 0, mark, alpha);
   c.restore();
 }
 
@@ -1688,7 +1693,7 @@ function drawLive(){
         // the tag rides with the arrow: "reading! 838 lines" is one sentence, and
         // when the arrow moves to another file the sentence goes with it rather
         // than leaving its second half stranded on a mark nothing is pointing at
-        if (lead) pointAt(tc, r, tmHost.clientWidth, seed('tma'), 1, n.tags);
+        if (lead) pointAt(tc, r, tmHost.clientWidth, seed('tma'), 1, n);
         if (editing) splat(tc, r.x + r.w - 12, r.y + 14, seed('tm'), age/SPLAT_MS);
         if (k > 0) rubOut(tc, markBox(r), seed('tm'), k);
       }
@@ -1699,7 +1704,7 @@ function drawLive(){
     if (fc && cell){
       const r = { x: cell.offsetLeft, y: cell.offsetTop, w: cell.offsetWidth, h: cell.offsetHeight };
       marker(fc, r, seed('fog'), prog, col);
-      if (lead) pointAt(fc, r, fogHost.clientWidth, seed('foga'), 1, n.tags);
+      if (lead) pointAt(fc, r, fogHost.clientWidth, seed('foga'), 1, n);
       if (editing) splat(fc, r.x + r.w, r.y, seed('fog'), age/SPLAT_MS);
       if (k > 0) rubOut(fc, markBox(r), seed('fog'), k);
     }
