@@ -25,6 +25,7 @@ npx claude-sketch
 - 🧠 **agents** — `main ─task▶ subagents`, each with model, brief, status, duration. Click one to filter everything to it.
 - 📝 **margin notes** — "read 6×, probably already in context", "poking `vendor/` 9×", "edit → run loop 👍".
 - ✂️ **deletions & diffs** — `rm` inside a Bash call shows up struck through; edits carry `+12 −3`.
+- ✳️ **light or dark** — press the ✳ beside the title. It follows your system until you do, and one more press hands it back.
 
 ## 💸 The number nobody expects
 
