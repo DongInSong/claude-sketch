@@ -41,6 +41,48 @@ test('CLAUDE_CONFIG_DIR decides where the transcripts are looked for', (t) => {
   assert.equal(found.sessions, 1);
 });
 
+// Nothing is written to a transcript while a tool runs, so a long call looks
+// exactly like a finished session if all you have is the file's mtime.
+test('a tool call still out means working, however long the file has sat still', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-busy-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-busyroot-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const dir = path.join(home, 'projects', slugOf(root));
+  fs.mkdirSync(dir, { recursive: true });
+  const call = (id, at) => JSON.stringify({ type: 'assistant', timestamp: new Date(at).toISOString(),
+    message: { id: 'm' + id, model: 'opus',
+      content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'sleep 300' } }] } }) + '\n';
+  const result = (id, at) => JSON.stringify({ type: 'user', timestamp: new Date(at).toISOString(),
+    message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } }) + '\n';
+
+  // three sessions, none of them written to for five minutes
+  const long = Date.now() - 5 * 60e3;
+  const write = (name, body, mtime) => {
+    const fp = path.join(dir, name + '.jsonl');
+    fs.writeFileSync(fp, body);
+    fs.utimesSync(fp, new Date(mtime), new Date(mtime));   // pretend it went quiet
+    return fp;
+  };
+  write('aaa', call('t1', Date.now() - 90e3), long);                    // call still out, started 90s ago
+  write('bbb', call('t2', long) + result('t2', long), long);            // call came back, then silence
+  write('ccc', call('t3', Date.now() - 40 * 60e3), Date.now() - 40 * 60e3);  // killed mid-call, 40min ago
+
+  const by = new Map(new Project(root).list().sessions.map(s => [s.id, s]));
+  assert.equal(by.get('aaa').active, true,
+    'a tool call running for 90s read as idle — the file has not moved, but the work has not stopped');
+  assert.equal(by.get('bbb').active, false, 'a finished session should not read as working');
+  assert.equal(by.get('ccc').active, false,
+    'a session killed mid-call would claim to be working for ever');
+});
+
 // A file Claude just wrote belongs to the project the moment it exists, not once
 // someone runs git add. What keeps that from also meaning "and all of
 // node_modules" is --exclude-standard, so that is the half worth a test.
