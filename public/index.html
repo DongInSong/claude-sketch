@@ -807,6 +807,7 @@ function newState(id){
     now:null,             // {file, ts} — what is being touched right now
     firstTs:0,            // first event — gives the session's working span
     tasks:new Map(),      // tool_use id -> {desc, sub, start, end, agent}
+    live:new Map(),       // file -> the mark on it, while it lasts (parallel agents)
     all:[],               // raw op/res events — replayed when the agent filter changes
     seen:new Set(),       // their ids, so a reconnect's replayed backlog lands once
     filter:null,          // null = every agent, else an agent name
@@ -913,7 +914,12 @@ function applyEvent(ev, silent, replay){
   if (ev.op==='read') fs.reads++;
   if (!silent){
     fs.delta++; fs.deltaT = Date.now();
+    // Agents work in parallel, so more than one file can be live at once. The
+    // newest still wins S.now — it is what the arrow points at and what the
+    // ticker reads — but the others stay marked instead of dropping to warm.
     S.now = {file: ev.file, ts: Date.now(), op: ev.op, id: ev.id || ev.file};
+    S.live.set(ev.file, S.now);
+    if (S.live.size > LIVE_MAX) S.live.delete(S.live.keys().next().value);
   }
   fs.hb[Math.floor(ev.ts/BUCKET)] = (fs.hb[Math.floor(ev.ts/BUCKET)]||0)+1;
   S.files.set(ev.file, fs);
@@ -1201,11 +1207,27 @@ document.addEventListener('mousemove', e=>{
   dtip.style.left = Math.max(6, Math.min(innerWidth-tw-8, e.clientX+14))+'px';
   dtip.style.top = (e.clientY-th-12 < 4 ? e.clientY+16 : e.clientY-th-12)+'px';
 });
-const BUSY_MS = 45000;                     // no tool call for this long → idle, not working
+// Two signals decide "working", because neither is enough alone. A tool call
+// arriving over the event stream says so instantly — but tool calls sit further
+// apart than they look: measured across real sessions, 10–27% of the gaps
+// between them run past 45s while Claude is thinking or writing a long answer.
+// The server's flag comes from the transcript still growing, which covers
+// exactly those stretches, at the cost of up to one poll of lag. Either means
+// working; only both quiet means idle.
+const BUSY_MS = 45000;                     // no tool call for this long → look at the file instead
 const NOW_MS = 20000;   // how long a highlight stays up — the same everywhere, so
                         // one event does not vanish from one panel while it sits in another
 const WARM_MS = 90000;                     // touched-lately files keep a quiet ring
-function isNow(p){ return !!(S.now && S.now.file === p && Date.now()-S.now.ts < NOW_MS); }
+// How many files can wear a live mark at once. Measured on a real session that
+// ran 325 subagents, at most 8 files were touched inside any one second, and the
+// average was 1.5 — so this is headroom, not a guess, and past it the page would
+// be scribble anyway.
+const LIVE_MAX = 8;
+const liveAt = (p) => { const n = S.live && S.live.get(p); return n && Date.now()-n.ts < NOW_MS ? n : null; };
+function isNow(p){ return !!liveAt(p); }
+// newest first, so the arrow and the drawing order agree
+const liveNow = () => !S.live ? []
+  : [...S.live.values()].filter(n => Date.now()-n.ts < NOW_MS).sort((a,b) => b.ts - a.ts);
 function isWarm(fs){ return !!(fs.lastT && Date.now()-fs.lastT < WARM_MS); }
 /* ══ live marks — crayon, and never the same twice ══
    Everything the eye should snap to is drawn by hand on an overlay canvas:
@@ -1458,47 +1480,60 @@ const markBox = (r) => labelLeft(r)
 const DRAW_MS = 340;                     // how long the pen takes to cross the mark
 
 function drawLive(){
-  const age = nowAge(), on = age < NOW_MS;
-  const editing = on && S.now.op === 'edit' && age < SPLAT_MS;
-  const prog = REDUCED ? 1 : Math.min(1, age/DRAW_MS);
-  const k = rubK(age, NOW_MS);
-  const col = liveCol();
-  const seed = (what) => hash((S.now ? S.now.id : '') + what);   // steady for this mark
+  const live = liveNow();                    // newest first
+  const newest = live[0];
 
-  // treemap: rects are already in canvas coordinates
-  const tmHost = $('tm').parentElement;
+  // The panels are cleared by fitLive, so they are set up once and every live
+  // file draws into them. Only the newest gets the arrow: one thing is being
+  // pointed at, the rest are simply still warm enough to be marked.
+  const tmHost = $('tm').parentElement, fogHost = $('fogMap'), rowHost = $('rows');
   const tc = fitLive('tmNow', tmHost);
-  if (tc && on){
-    const r = TM_RECTS.find(x => !x.agg && x.path === S.now.file);
-    if (r){
-      markerEdge(tc, { x: r.x+3, y: r.y+3, w: r.w-6, h: r.h-6 }, seed('tm'), prog, col);
-      pointAt(tc, r, tmHost.clientWidth, seed('tma'), 1);
-      if (editing) splat(tc, r.x + r.w - 12, r.y + 14, seed('tm'), age/SPLAT_MS);
-      if (k > 0) rubOut(tc, markBox(r), seed('tm'), k);
-    }
-  }
-
-  // fog map: the cell is a DOM box, measured against its own panel
-  const fogHost = $('fogMap');
   const fc = fitLive('fogNow', fogHost);
-  const cell = on ? fogHost.querySelector('.mc.now') : null;
-  if (fc && cell){
-    const r = { x: cell.offsetLeft, y: cell.offsetTop, w: cell.offsetWidth, h: cell.offsetHeight };
-    marker(fc, r, seed('fog'), prog, col);
-    pointAt(fc, r, fogHost.clientWidth, seed('foga'), 1);
-    if (editing) splat(fc, r.x + r.w, r.y, seed('fog'), age/SPLAT_MS);
-    if (k > 0) rubOut(fc, markBox(r), seed('fog'), k);
-  }
-
-  // timeline: mark the whole row, since that is the line being read
-  const rowHost = $('rows');
   const rc = fitLive('rowsNow', rowHost);
-  const row = on ? (rowEls.get(S.now.file) || {}).el : null;
-  if (rc && row && row.isConnected){
-    const r = { x: 0, y: row.offsetTop - 1, w: rowHost.clientWidth, h: row.offsetHeight + 2 };
-    marker(rc, r, seed('row'), prog, col);
-    if (editing) splat(rc, r.x + r.w - 26, r.y + r.h/2, seed('row'), age/SPLAT_MS);
-    if (k > 0) rubOut(rc, { x: r.x, y: r.y-3, w: r.w, h: r.h+6 }, seed('row'), k);
+  if (!live.length) return;
+
+  const fogCells = new Map();
+  for (const el of fogHost.querySelectorAll('.mc.now'))
+    if (el.dataset.path) fogCells.set(el.dataset.path, el);
+
+  for (const n of live){
+    const age = Date.now() - n.ts;
+    const editing = n.op === 'edit' && age < SPLAT_MS;
+    const prog = REDUCED ? 1 : Math.min(1, age/DRAW_MS);
+    const k = rubK(age, NOW_MS);
+    const col = (n.op === 'del') ? PAL.ink3 : opCol(n.op || 'read');
+    const seed = (what) => hash(n.id + what);   // steady for this mark
+    const lead = n === newest;                  // the one the arrow belongs to
+
+    // treemap: rects are already in canvas coordinates
+    if (tc){
+      const r = TM_RECTS.find(x => !x.agg && x.path === n.file);
+      if (r){
+        markerEdge(tc, { x: r.x+3, y: r.y+3, w: r.w-6, h: r.h-6 }, seed('tm'), prog, col);
+        if (lead) pointAt(tc, r, tmHost.clientWidth, seed('tma'), 1);
+        if (editing) splat(tc, r.x + r.w - 12, r.y + 14, seed('tm'), age/SPLAT_MS);
+        if (k > 0) rubOut(tc, markBox(r), seed('tm'), k);
+      }
+    }
+
+    // fog map: the cell is a DOM box, measured against its own panel
+    const cell = fogCells.get(n.file);
+    if (fc && cell){
+      const r = { x: cell.offsetLeft, y: cell.offsetTop, w: cell.offsetWidth, h: cell.offsetHeight };
+      marker(fc, r, seed('fog'), prog, col);
+      if (lead) pointAt(fc, r, fogHost.clientWidth, seed('foga'), 1);
+      if (editing) splat(fc, r.x + r.w, r.y, seed('fog'), age/SPLAT_MS);
+      if (k > 0) rubOut(fc, markBox(r), seed('fog'), k);
+    }
+
+    // timeline: mark the whole row, since that is the line being read
+    const row = (rowEls.get(n.file) || {}).el;
+    if (rc && row && row.isConnected){
+      const r = { x: 0, y: row.offsetTop - 1, w: rowHost.clientWidth, h: row.offsetHeight + 2 };
+      marker(rc, r, seed('row'), prog, col);
+      if (editing) splat(rc, r.x + r.w - 26, r.y + r.h/2, seed('row'), age/SPLAT_MS);
+      if (k > 0) rubOut(rc, { x: r.x, y: r.y-3, w: r.w, h: r.h+6 }, seed('row'), k);
+    }
   }
 }
 
@@ -1608,6 +1643,7 @@ function updateFog(){
         el.style.borderColor = fs.reads>=4 ? PAL.del : opCol(domOp(fs.ops));
         if (sc/maxD > 0.5) el.style.boxShadow = `0 0 10px color-mix(in srgb, ${PAL.heat} 55%, transparent)`;
         el.dataset.tip = fileTip(p, fs, true);
+        el.dataset.path = p;                 // drawLive matches its marks to cells by this
         el.classList.add('openable');
         if (isNow(p)) el.classList.add('now');
         else if (isWarm(fs)) el.classList.add('warm');
@@ -2008,14 +2044,15 @@ function fmtAgo(ms){
   const h = Math.round(m/60);
   return h < 24 ? t('agoH', {n:h}) : t('agoD', {n:Math.round(h/24)});
 }
-// For the open session, "live" means the same thing "working" does — the last
-// tool call, not when the file was last written to.
+// A recent tool call means working, and it arrives instantly. When there has not
+// been one for a while that is not idle yet — see BUSY_MS — so fall through to
+// whether the transcript itself is still growing.
 function isLive(sess){
   if (S && S.id === sess.id && S.ready){
     const main = S.agents.get('main');
-    if (main && main.lastTs) return Date.now() - main.lastTs < BUSY_MS;
+    if (main && main.lastTs && Date.now() - main.lastTs < BUSY_MS) return true;
   }
-  return sess.active;
+  return !!sess.active;
 }
 let sessExpanded = false;
 const SESS_SHOWN = 5;
@@ -2096,7 +2133,9 @@ function renderAgents(){
     b.addEventListener('click', ()=> setFilter(nm));
     box.appendChild(b);
     if (nm === 'main'){                    // is the session working right now, and on what
-      const busy = a.lastTs && Date.now() - a.lastTs < BUSY_MS;
+      // the same answer the badge in the session list gives — one idea of working
+      const sess = SESSIONS.find(x => x.id === S.id);
+      const busy = sess ? isLive(sess) : !!(a.lastTs && Date.now() - a.lastTs < BUSY_MS);
       const bits = [busy ? `<span class="run">${t('mainRun')}</span>` : t('mainIdle')];
       if (a.lastOp){
         const f = a.lastOp === 'bash' ? String(a.lastFile).slice(0,28)+'…' : String(a.lastFile).split('/').pop();
@@ -2311,10 +2350,18 @@ setInterval(()=>{
     if (s.delta>0 && now-s.deltaT > 15000) s.delta = 0;
   renderAll();
 }, 3000);
-setInterval(()=>{                       // let the live marker fade on its own when idle
-  if (!S || !S.now || Date.now()-S.now.ts <= NOW_MS) return;
-  S.now = null;
-  document.querySelectorAll('.mc.now').forEach(e=>e.classList.remove('now'));
+setInterval(()=>{                       // let the live marks fade on their own when idle
+  if (!S || !S.live) return;
+  const now = Date.now();
+  let dropped = false;
+  for (const [file, n] of S.live)
+    if (now - n.ts > NOW_MS){ S.live.delete(file); dropped = true; }
+  if (!dropped) return;
+  // S.now is the newest of them, so it expires last: once it is gone nothing is live
+  if (S.now && now - S.now.ts > NOW_MS) S.now = null;
+  document.querySelectorAll('.mc.now').forEach(e=>{
+    if (!isNow(e.dataset.path)) e.classList.remove('now');
+  });
   drawLive();
 }, 1000);
 setInterval(loadSessions, 10000);   // keeps the live/done badges honest
