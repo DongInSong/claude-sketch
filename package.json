@@ -15,7 +15,10 @@
     "bin",
     "lib",
     "public",
-    "README.md"
+    "README.md",
+    "README.ko.md",
+    "README.ja.md",
+    "README.zh.md"
   ],
   "scripts": {
     "test": "node --test"
