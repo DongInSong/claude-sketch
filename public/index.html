@@ -269,7 +269,14 @@
   section.folded > *:not(h2){display:none !important}
   section.folded h2{margin-bottom:0;opacity:.72}
   section h2:hover{color:var(--accent)}
-  .hint{font-size:14px;color:var(--ink3);margin:0 0 12px}
+  /* These lines were breaking a word before the end — "…worked on outside this /
+     project" — and balance is what actually stops it. Measured against the same
+     text at eight widths: pretty left the dangling word exactly where it was at
+     every one of them, while balance kept the sentence whole down to 460px and
+     split it evenly below that. Browsers without it wrap as they did before. */
+  .hint{font-size:14px;color:var(--ink3);margin:0 0 12px;text-wrap:balance}
+  /* a count is one thing and reads as one — never split at the slash */
+  #cov{white-space:nowrap}
   .hint u{text-decoration:underline wavy 2px;text-underline-offset:3px}
   .hint .ur{color:var(--op-read)} .hint .ug{color:var(--op-grep)}
   .hint .ue{color:var(--op-edit)}
@@ -486,7 +493,7 @@
 
   <section data-key="fog">
     <h2 data-i18n="fogTitle"></h2>
-    <p class="hint"><span data-i18n-html="fogHint"></span> <b id="cov">–</b></p>
+    <p class="hint"><span data-i18n-html="fogHint"></span> <b id="cov">–</b><span id="covNote"></span></p>
     <p class="rootnote" id="rootNote" hidden></p>
     <div class="livewrap"><div id="fogMap"></div><canvas class="livecv" id="fogNow"></canvas></div>
     <p class="nofiles" id="noFiles" hidden></p>
@@ -582,9 +589,9 @@ const I18N = {
     flagReread:'⚠ re-read {n}× — likely already in context',
     flagJunk:'⚠ dependency / cache path',
     quietBand: '⋯⋯ {n} quiet files · {m} folder(s) ⋯⋯',
-    coverage: '{a} / {b} ({p}%)',
-    coverageCapped: '{a} / {b} · only the first {b} of {n} files are counted',
-    coverageElsewhere: '{a} / {b} · {n} more files, worked on outside this project',
+    coverage: '{a} / {b} ({p}%)', coverageNum: '{a} / {b}',
+    coverageCapped: 'only the first {b} of {n} files are counted',
+    coverageElsewhere: '{n} more files, worked on outside this project',
     noActivity: 'no activity yet',
     nRereadT: '<u>{f}</u> read {n}× — probably already in context',
     nRereadW: 'likely duplicated context',
@@ -656,9 +663,9 @@ const I18N = {
     flagReread:'⚠ {n}번이나 다시 읽음 — 이미 컨텍스트에 있을 텐데',
     flagJunk:'⚠ 의존성 / 캐시 경로',
     quietBand: '⋯⋯ 조용한 파일 {n}개 · 폴더 {m}개 ⋯⋯',
-    coverage: '{a} / {b} ({p}%)',
-    coverageCapped: '{a} / {b} · {n}개 중 앞 {b}개만 셈',
-    coverageElsewhere: '{a} / {b} · 이 프로젝트 밖에서 {n}개 더 작업',
+    coverage: '{a} / {b} ({p}%)', coverageNum: '{a} / {b}',
+    coverageCapped: '{n}개 중 앞 {b}개만 셈',
+    coverageElsewhere: '이 프로젝트 밖에서 {n}개 더 작업',
     noActivity: '아직 활동 없음',
     nRereadT: '<u>{f}</u> {n}번이나 다시 읽음 — 이미 컨텍스트에 있을 텐데',
     nRereadW: '중복 컨텍스트 소비 추정',
@@ -730,9 +737,9 @@ const I18N = {
     flagReread:'⚠ {n} 回読み直し — すでにコンテキストにあるかも',
     flagJunk:'⚠ 依存 / キャッシュのパス',
     quietBand: '⋯⋯ 静かなファイル {n} 件 · フォルダ {m} 件 ⋯⋯',
-    coverage: '{a} / {b} ({p}%)',
-    coverageCapped: '{a} / {b} · {n} 件中 先頭 {b} 件のみ集計',
-    coverageElsewhere: '{a} / {b} · このプロジェクト外で {n} 件',
+    coverage: '{a} / {b} ({p}%)', coverageNum: '{a} / {b}',
+    coverageCapped: '{n} 件中 先頭 {b} 件のみ集計',
+    coverageElsewhere: 'このプロジェクト外で {n} 件',
     noActivity: 'まだ動きがありません',
     nRereadT: '<u>{f}</u> を {n} 回読み直し — すでにコンテキストにあるかも',
     nRereadW: '文脈の重複消費とみられます',
@@ -804,9 +811,9 @@ const I18N = {
     flagReread:'⚠ 重读 {n} 次 · 多半已在上下文里',
     flagJunk:'⚠ 依赖 / 缓存路径',
     quietBand: '⋯⋯ 安静文件 {n} 个 · 文件夹 {m} 个 ⋯⋯',
-    coverage: '{a} / {b} ({p}%)',
-    coverageCapped: '{a} / {b} · 共 {n} 个文件，仅统计前 {b} 个',
-    coverageElsewhere: '{a} / {b} · 另有 {n} 个在本项目之外',
+    coverage: '{a} / {b} ({p}%)', coverageNum: '{a} / {b}',
+    coverageCapped: '共 {n} 个文件，仅统计前 {b} 个',
+    coverageElsewhere: '另有 {n} 个在本项目之外',
     noActivity: '还没有活动',
     nRereadT: '<u>{f}</u> 重读 {n} 次 · 多半已在上下文里',
     nRereadW: '疑似重复消耗上下文',
@@ -2067,10 +2074,18 @@ function updateFog(){
   const strayed = touched >= 4 && inU / touched < 0.3;
   // A truncated file list makes the denominator arbitrary, so the percentage
   // would be a confident lie — show the count and say what it is counting.
+  // The count wears the crayon; the reason stands next to it in the hint's own
+  // small type. Both used to go inside the mark together, which put a sentence
+  // in a highlighter meant for a number and then broke the highlighter across
+  // the line when it wrapped.
   $('cov').textContent = !total ? ''
-    : strayed ? t('coverageElsewhere', {a:inU, b:total, n:touched - inU})
-    : UNIVERSE.truncated ? t('coverageCapped', {a:inU, b:total, n:UNIVERSE.listed})
+    : (strayed || UNIVERSE.truncated) ? t('coverageNum', {a:inU, b:total})
     : t('coverage', {a:inU, b:total, p:Math.round(inU/total*100)});
+  const why = !total ? ''
+    : strayed ? t('coverageElsewhere', {n:touched - inU})
+    : UNIVERSE.truncated ? t('coverageCapped', {b:total, n:UNIVERSE.listed})
+    : '';
+  $('covNote').textContent = why ? ' · ' + why : '';
 }
 
 /* ══ treemap — crayon ══ */
