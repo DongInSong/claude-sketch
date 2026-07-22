@@ -67,6 +67,18 @@ test('computeRoot(): absolute directories count — work above the recorded fold
   assert.equal(stripRoot('/tmp/scratch', root), '/tmp/scratch', 'genuinely elsewhere keeps its name');
 });
 
+test('computeRoot(): counts folders, not the files in them', () => {
+  // callers hand it one entry per file, so a folder with a lot of files in it
+  // would otherwise outvote all the folders that share the prefix
+  const perFile = [
+    '/home/me/proj/lib', '/home/me/proj/public', '/home/me/proj/public/lib',
+    '/home/me/proj/test', '/home/me/proj/tools', '/home/me/proj',
+    '/tmp/scratch', '/tmp/scratch', '/tmp/scratch', '/tmp/scratch', '/tmp/scratch',
+  ];
+  assert.equal(computeRoot(perFile), '/home/me/proj',
+    'five files in one scratch folder outvoted six project folders');
+});
+
 test('computeRoot(): a genuine even split still hides nothing', () => {
   assert.equal(computeRoot(['src/a', 'src/b', 'test/c', 'test/d']), '',
     'neither half is most of it, so there is no honest prefix to pull out');

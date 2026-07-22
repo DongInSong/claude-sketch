@@ -35,8 +35,12 @@ export function shortDir(d, keep) {
 // and work above that stays absolute — run it in a repo's bin/ and the whole of
 // lib/, public/ and test/ arrives as /home/…/project/lib and friends. Skipping
 // those left the common prefix empty exactly when it was needed most.
+// Counted per directory, not per file: callers hand this one entry per file, and
+// a single folder holding a lot of them would otherwise decide the prefix for
+// everyone. Measured on one session, 16 of 31 files sat under the project — short
+// of the threshold — while 6 of its 10 directories did, which is the real answer.
 export function computeRoot(dirs, share = 0.6) {
-  const usable = dirs.filter(d => d && !d.startsWith('('));
+  const usable = [...new Set(dirs.filter(d => d && !d.startsWith('(')))];
   if (usable.length < 2) return '';
   const need = Math.max(2, Math.ceil(usable.length * share));
 

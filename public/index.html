@@ -1656,13 +1656,19 @@ function updateFog(){
   // The row above already showed the leading part of this path, so print only
   // what changed and let the indent carry the rest. No ellipsis, and no two rows
   // can read the same, which is what deep trees used to do to this panel.
-  let shown = [];
+  let shown = [], shownAbs = false;
   const carry = (dir) => {
+    const abs = dir.startsWith('/');
     const seg = dir.split('/').filter(Boolean);
     let i = 0;
-    while (i < shown.length && i < seg.length && shown[i] === seg[i]) i++;
-    shown = seg;
-    return { indent: i, text: seg.slice(i).join('/') };
+    // an absolute path carries nothing over from a relative one, whatever the
+    // segments happen to look like
+    if (abs === shownAbs)
+      while (i < shown.length && i < seg.length && shown[i] === seg[i]) i++;
+    shown = seg; shownAbs = abs;
+    // splitting drops the leading separator, and putting it back is the
+    // difference between /home/me/x and something that looks relative
+    return { indent: i, text: (abs && !i ? '/' : '') + seg.slice(i).join('/') };
   };
 
   // Outside means "absolute, and not under the prefix the work shares" — not
