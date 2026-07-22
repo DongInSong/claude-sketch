@@ -237,7 +237,10 @@
   /* fog map */
   #fogMap{display:flex;flex-direction:column;gap:6px}
   .fgrow{display:flex;align-items:flex-start;gap:10px}
-  .fgrow .ilab{flex:none;width:196px;font-size:14.5px;font-weight:700;color:var(--ink2);padding-top:2px;
+  /* wide enough for what a row prints now that it only prints what changed —
+     measured across real sessions that averages 17 characters. A rare long one
+     still clips, and its whole path is in the tooltip. */
+  .fgrow .ilab{flex:none;width:232px;font-size:14.5px;font-weight:700;color:var(--ink2);padding-top:2px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .fgcells{display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0}
   .band{font-size:13px;color:var(--ink3);border:1.7px dashed var(--ink3);opacity:.55;
@@ -462,6 +465,9 @@ const I18N = {
     dirHits: '· {n} hits',
     quietLine: '… +{n} quiet files ({h} hits) — {names}',
     quietBandTitle:'untouched folders',
+    outsideBandTitle:'touched outside this project',
+    outsideBand: '⋯⋯ {n} file(s) outside the project · {m} folder(s) ⋯⋯',
+    lblFolders:'folders',
     pickTitle:'folders Claude Code has worked in', pickMeta:'{n} sessions · {a}',
     pickGone:'folder no longer on disk',
     moreSess:'+{n} more', lessSess:'show less', earlierTasks:'+{n} earlier tasks',
@@ -478,7 +484,7 @@ const I18N = {
     lblModel:'model', lblCalls:'calls', lblIn:'tokens in', lblOut:'tokens out',
     flagFilterOn:'click to show every agent', flagFilterOff:'click to show only this agent',
     filterHint:'click an agent to see only its files', filterOn:'showing only {a} — click again to reset',
-    underRoot:'all paths inside <b>{p}</b>',
+    underRoot:'most paths inside <b>{p}</b>',
     lblAdded:'lines +', lblRemoved:'lines −', flagGone:'✕ deleted', taskQuick:'done in under a second',
     lblHits:'hits', lblRead:'read', lblSearch:'search', lblEdit:'edit',
     lblTok:'tokens', lblAgents:'agents', lblFiles:'files', lblTouched:'touched',
@@ -528,6 +534,9 @@ const I18N = {
     dirHits: '· {n}회',
     quietLine: '… 조용한 파일 {n}개 ({h}회) — {names}',
     quietBandTitle:'미접촉 폴더',
+    outsideBandTitle:'프로젝트 밖에서 접촉',
+    outsideBand: '⋯⋯ 프로젝트 밖 파일 {n}개 · 폴더 {m}개 ⋯⋯',
+    lblFolders:'폴더',
     pickTitle:'Claude Code가 작업한 적 있는 폴더', pickMeta:'세션 {n}개 · {a}',
     pickGone:'폴더가 지금은 없음',
     moreSess:'+{n}개 더', lessSess:'접기', earlierTasks:'이전 task {n}개 더',
@@ -544,7 +553,7 @@ const I18N = {
     lblModel:'모델', lblCalls:'호출', lblIn:'입력 토큰', lblOut:'출력 토큰',
     flagFilterOn:'클릭하면 전체 에이전트로', flagFilterOff:'클릭하면 이 에이전트만',
     filterHint:'에이전트를 클릭하면 그 에이전트가 손댄 파일만 남습니다', filterOn:'{a} 만 표시 중 — 다시 클릭하면 해제',
-    underRoot:'모든 경로는 <b>{p}</b> 아래',
+    underRoot:'경로 대부분은 <b>{p}</b> 아래',
     lblAdded:'추가 줄', lblRemoved:'삭제 줄', flagGone:'✕ 삭제됨', taskQuick:'1초도 안 걸림',
     lblHits:'히트', lblRead:'읽기', lblSearch:'검색', lblEdit:'수정',
     lblTok:'토큰', lblAgents:'에이전트', lblFiles:'파일', lblTouched:'접촉',
@@ -594,6 +603,9 @@ const I18N = {
     dirHits: '· {n} 回',
     quietLine: '… 静かなファイル {n} 件（{h} 回）— {names}',
     quietBandTitle:'未接触フォルダ',
+    outsideBandTitle:'プロジェクト外での接触',
+    outsideBand: '⋯⋯ プロジェクト外のファイル {n} 件 · フォルダ {m} 件 ⋯⋯',
+    lblFolders:'フォルダ',
     pickTitle:'Claude Code が作業したフォルダ', pickMeta:'セッション {n} 件 · {a}',
     pickGone:'フォルダは今はありません',
     moreSess:'+{n} 件', lessSess:'たたむ', earlierTasks:'以前の task {n} 件',
@@ -610,7 +622,7 @@ const I18N = {
     lblModel:'モデル', lblCalls:'呼び出し', lblIn:'入力トークン', lblOut:'出力トークン',
     flagFilterOn:'クリックで全エージェント表示', flagFilterOff:'クリックでこのエージェントのみ',
     filterHint:'エージェントをクリックすると、そのエージェントのファイルだけ表示されます', filterOn:'{a} のみ表示中 — もう一度クリックで解除',
-    underRoot:'すべてのパスは <b>{p}</b> の下',
+    underRoot:'パスの大半は <b>{p}</b> の下',
     lblAdded:'追加行', lblRemoved:'削除行', flagGone:'✕ 削除済み', taskQuick:'1秒未満で完了',
     lblHits:'ヒット', lblRead:'読む', lblSearch:'検索', lblEdit:'編集',
     lblTok:'トークン', lblAgents:'エージェント', lblFiles:'ファイル', lblTouched:'接触',
@@ -660,6 +672,9 @@ const I18N = {
     dirHits: '· {n} 次',
     quietLine: '… 另有 {n} 个安静文件（{h} 次）— {names}',
     quietBandTitle:'未接触的文件夹',
+    outsideBandTitle:'在项目之外接触',
+    outsideBand: '⋯⋯ 项目外文件 {n} 个 · 文件夹 {m} 个 ⋯⋯',
+    lblFolders:'文件夹',
     pickTitle:'Claude Code 干过活的文件夹', pickMeta:'{n} 个会话 · {a}',
     pickGone:'文件夹已不在',
     moreSess:'+{n} 个', lessSess:'收起', earlierTasks:'更早的 task {n} 个',
@@ -676,7 +691,7 @@ const I18N = {
     lblModel:'模型', lblCalls:'调用', lblIn:'输入 token', lblOut:'输出 token',
     flagFilterOn:'点击显示全部智能体', flagFilterOff:'点击只看这个智能体',
     filterHint:'点某个 agent，只看它碰过的文件', filterOn:'仅显示 {a} — 再次点击可取消',
-    underRoot:'所有路径都在 <b>{p}</b> 之下',
+    underRoot:'多数路径都在 <b>{p}</b> 之下',
     lblAdded:'新增行', lblRemoved:'删除行', flagGone:'✕ 已删除', taskQuick:'用时不到 1 秒',
     lblHits:'命中', lblRead:'读取', lblSearch:'搜索', lblEdit:'编辑',
     lblTok:'token', lblAgents:'agent', lblFiles:'文件', lblTouched:'接触',
@@ -1574,7 +1589,12 @@ function fogTree(){
     if (!extra.has(d)) extra.set(d, []);
     extra.get(d).push(p.split('/').pop());
   }
-  return base.concat([...extra.entries()]);
+  // Sorted as one list, because the labels below only print what changed from the
+  // row above — which is only readable if siblings actually sit next to each other.
+  // Directories touched outside the project sort to the end, where they get folded.
+  const outside = (d) => d.startsWith('/') || d.startsWith('(') ? 1 : 0;
+  return base.concat([...extra.entries()])
+    .sort((a, b) => outside(a[0]) - outside(b[0]) || a[0].localeCompare(b[0]));
 }
 function updateFog(){
   const box = $('fogMap');
@@ -1602,8 +1622,40 @@ function updateFog(){
     quietFiles = 0; quietDirs = [];
   };
 
+  // Anything Claude touched outside the project has no prefix in common with the
+  // rest and no useful place in the tree, so it folds into one line of its own.
+  let outFiles = 0, outDirs = [];
+  const flushOutside = ()=>{
+    if (!outFiles) return;
+    const band = document.createElement('span');
+    band.className = 'band wide';
+    band.textContent = t('outsideBand', {n: outFiles.toLocaleString(), m: outDirs.length});
+    band.dataset.tip = tipBox(t('outsideBandTitle'),
+      [[t('lblFiles'), outFiles.toLocaleString()], [t('lblFolders'), String(outDirs.length)]],
+      {note: outDirs.slice(0,6).join(', ') + (outDirs.length>6?', …':'')});
+    frag.appendChild(band);
+    outFiles = 0; outDirs = [];
+  };
+
+  // The row above already showed the leading part of this path, so print only
+  // what changed and let the indent carry the rest. No ellipsis, and no two rows
+  // can read the same, which is what deep trees used to do to this panel.
+  let shown = [];
+  const carry = (dir) => {
+    const seg = dir.split('/').filter(Boolean);
+    let i = 0;
+    while (i < shown.length && i < seg.length && shown[i] === seg[i]) i++;
+    shown = seg;
+    return { indent: i, text: seg.slice(i).join('/') };
+  };
+
   for (const [dir, names] of fogTree()){
     const hits = hitsByDir.get(dir) || [];
+    if (dir.startsWith('/')){                    // outside the project
+      if (hits.length){ outFiles += hits.length; outDirs.push(dir+'/'); }
+      else { quietFiles += names.length; quietDirs.push(dir+'/'); }
+      continue;
+    }
     if (!hits.length){ quietFiles += names.length; quietDirs.push(dir+'/'); continue; }
     flushQuiet();
     const named = names.slice().sort();
@@ -1621,9 +1673,14 @@ function updateFog(){
     row.className = 'fgrow';
     const lab = document.createElement('span');
     lab.className = 'ilab';
-    const depth = dir.startsWith('(') ? 0 : (dir.match(/\//g)||[]).length + 1;
-    lab.style.paddingLeft = (Math.min(depth,5)*11)+'px';
-    lab.textContent = dir.startsWith('(') ? dir : dirLabel(dir,3)+(dir===ROOT?'':'/');
+    if (dir.startsWith('(')){
+      lab.textContent = dir;
+      shown = [];                                // a bucket breaks the run
+    } else {
+      const c = carry(stripRoot(dir));
+      lab.style.paddingLeft = (Math.min(c.indent, 6) * 11) + 'px';
+      lab.textContent = (c.text || './') + '/';
+    }
     lab.dataset.tip = tipBox(dir+'/', [[t('lblFiles'), String(len)],
       [t('lblTouched'), String(hits.length)], [t('lblHits'), String(hits.reduce((a,[,f])=>a+f.total,0))]],
       {note: t('openTip')});
@@ -1672,6 +1729,7 @@ function updateFog(){
     frag.appendChild(row);
   }
   flushQuiet();
+  flushOutside();
   box.replaceChildren(frag);
   const total = UNIVERSE ? UNIVERSE.total : 0;
   const inU = UNIVERSE ? [...S.files.keys()].filter(p=>UNIVERSE.set.has(p)).length : S.files.size;

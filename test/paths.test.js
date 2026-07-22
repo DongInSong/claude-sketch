@@ -35,6 +35,29 @@ test('computeRoot(): the prefix every directory shares, or nothing', () => {
   assert.equal(computeRoot(['a/b/c', 'a/b/d']), 'a/b');
 });
 
+test('computeRoot(): one stray folder does not cost everyone else their prefix', () => {
+  // the shape that made it come back empty on every real session measured: nine
+  // directories deep under one tree, and a single file written somewhere else
+  const dirs = [
+    'docs/product-intro/20260622/captures',
+    'docs/product-intro/20260622/captures/02-observability/01-overview',
+    'docs/product-intro/20260622/captures/02-observability/02-trace',
+    'docs/product-intro/20260622/captures/02-observability/03-network',
+    'docs/product-intro/20260622/captures/05-flow/fixedlen',
+    'docs/product-intro/20260622/captures/light-theme',
+    'docs/product-intro/20260622/captures/slide-thumbnails',
+    '.playwright-mcp',
+  ];
+  assert.equal(computeRoot(dirs), 'docs/product-intro/20260622/captures');
+  // and the stray one keeps its whole name, because it is not under that prefix
+  assert.equal(stripRoot('.playwright-mcp', computeRoot(dirs)), '.playwright-mcp');
+});
+
+test('computeRoot(): a genuine even split still hides nothing', () => {
+  assert.equal(computeRoot(['src/a', 'src/b', 'test/c', 'test/d']), '',
+    'neither half is most of it, so there is no honest prefix to pull out');
+});
+
 test('stripRoot(): drops the shared prefix without eating a sibling', () => {
   assert.equal(stripRoot('src/lib', 'src'), 'lib');
   assert.equal(stripRoot('src', 'src'), './');

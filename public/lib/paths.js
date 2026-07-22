@@ -21,20 +21,33 @@ export function shortDir(d, keep) {
   return seg.length > (keep || 2) ? '…/' + seg.slice(-(keep || 2)).join('/') : d;
 }
 
-// Every directory shares the same leading segments when the work sits below the
-// project root — show that prefix once in the header, strip it from every label.
-export function computeRoot(dirs) {
+// Every directory shares the same leading segments when the work sits below one
+// part of the tree — show that prefix once in the header, strip it from every
+// label that has it.
+//
+// It used to require *every* directory to share it, which meant one stray folder
+// zeroed it for all of them: a single file written to .playwright-mcp/ was enough
+// to stop docs/product-intro/20260622/captures/ being taken off the nine rows
+// that did share it, and measured across real sessions it came out empty every
+// time. So it is the longest prefix most of them share, and a directory outside
+// it simply keeps its whole name — stripRoot already leaves those alone.
+export function computeRoot(dirs, share = 0.6) {
   const rel = dirs.filter(d => d && !d.startsWith('(') && !d.startsWith('/'));
   if (rel.length < 2) return '';
-  let pre = rel[0].split('/');
-  for (const d of rel.slice(1)) {
-    const seg = d.split('/');
-    let i = 0;
-    while (i < pre.length && i < seg.length && pre[i] === seg[i]) i++;
-    pre = pre.slice(0, i);
-    if (!pre.length) return '';
+  const need = Math.max(2, Math.ceil(rel.length * share));
+
+  const seen = new Map();                  // prefix -> how many directories are under it
+  for (const d of rel) {
+    const seg = d.split('/').filter(Boolean);
+    for (let i = 1; i <= seg.length; i++) {
+      const pre = seg.slice(0, i).join('/');
+      seen.set(pre, (seen.get(pre) || 0) + 1);
+    }
   }
-  return pre.join('/');
+  let best = '';
+  for (const [pre, n] of seen)
+    if (n >= need && pre.length > best.length) best = pre;
+  return best;
 }
 
 export function stripRoot(d, root) {
