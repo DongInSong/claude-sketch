@@ -239,9 +239,23 @@
   .fgrow{display:flex;align-items:flex-start;gap:10px}
   /* wide enough for what a row prints now that it only prints what changed —
      measured across real sessions that averages 17 characters. A rare long one
-     still clips, and its whole path is in the tooltip. */
+     still clips, and its whole path is in the tooltip.
+     --depth is set per row; one number drives both the indent and the guides. */
   .fgrow .ilab{flex:none;width:232px;font-size:14.5px;font-weight:700;color:var(--ink2);padding-top:2px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    --step:14px; --depth:0; position:relative; padding-left:calc(var(--depth) * var(--step))}
+  /* One faint stroke per segment this row carries over from the line above — the
+     depth its text starts at. Strokes and not a ├ or a └ on purpose: the folder a
+     row hangs off is usually inside the previous line's text rather than being a
+     line of its own (measured on real sessions, 80–84% of indented rows), so a
+     connector would point at the wrong one. A stroke claims depth and nothing
+     about parentage, which is true in every case. Drawn through the same squiggle
+     as everything else straight on this page, so it reads as pencil, not a rule. */
+  .fgrow .ilab::before{content:'';position:absolute;left:0;top:1px;bottom:1px;pointer-events:none;
+    width:calc(var(--depth) * var(--step));
+    background:repeating-linear-gradient(to right,
+      color-mix(in srgb, var(--ink3) 38%, transparent) 0 1.6px, transparent 1.6px var(--step));
+    filter:url(#squiggle)}
   .fgcells{display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0}
   .band{font-size:13px;color:var(--ink3);border:1.7px dashed var(--ink3);opacity:.55;
     border-radius:10px 14px 11px 15px / 14px 11px 15px 10px;padding:1px 9px;white-space:nowrap;flex:none}
@@ -1692,7 +1706,7 @@ function updateFog(){
       shown = [];                                // a bucket breaks the run
     } else {
       const c = carry(stripRoot(dir));
-      lab.style.paddingLeft = (Math.min(c.indent, 6) * 11) + 'px';
+      lab.style.setProperty('--depth', String(Math.min(c.indent, 6)));
       lab.textContent = (c.text || './') + '/';
     }
     lab.dataset.tip = tipBox(dir+'/', [[t('lblFiles'), String(len)],
