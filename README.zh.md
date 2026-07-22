@@ -12,8 +12,8 @@ npx claude-sketch
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="整页都在动 —— 足迹、树状图和文件热度同时标出同一个文件">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live-dark.gif">
+  <img src="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live.gif" alt="整页都在动 —— 足迹、树状图和文件热度同时标出同一个文件">
 </picture>
 
 ## 👀 你能看到

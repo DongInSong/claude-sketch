@@ -12,8 +12,8 @@ npx claude-sketch
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="ページ全体が動きます — 足あと・ツリーマップ・ファイル熱量が同じファイルを同時に示す">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live-dark.gif">
+  <img src="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live.gif" alt="ページ全体が動きます — 足あと・ツリーマップ・ファイル熱量が同じファイルを同時に示す">
 </picture>
 
 ## 👀 見えるもの

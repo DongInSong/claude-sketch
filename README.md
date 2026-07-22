@@ -12,8 +12,8 @@ npx claude-sketch
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="the whole page moving: footprints, treemap and file heat all marking the same file as it is read and then edited">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live-dark.gif">
+  <img src="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live.gif" alt="the whole page moving: footprints, treemap and file heat all marking the same file as it is read and then edited">
 </picture>
 
 ## 👀 What you get

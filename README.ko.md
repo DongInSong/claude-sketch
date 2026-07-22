@@ -12,8 +12,8 @@ npx claude-sketch
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="페이지 전체가 움직입니다 — 발자국·트리맵·파일 히트가 같은 파일을 읽고 고치는 동안 함께 표시">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live-dark.gif">
+  <img src="https://raw.githubusercontent.com/DongInSong/claude-sketch/main/docs/live.gif" alt="페이지 전체가 움직입니다 — 발자국·트리맵·파일 히트가 같은 파일을 읽고 고치는 동안 함께 표시">
 </picture>
 
 ## 👀 보이는 것
