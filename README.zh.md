@@ -12,13 +12,13 @@ npx claude-sketch
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot.png" alt="claude-sketch：足迹、注意力占比、文件热度">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
+  <img src="docs/live.gif" alt="一次读取，两次编辑 — 标记、箭头，以及实时累加的行数">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="一次读取，两次编辑 — 标记、箭头，以及实时累加的行数">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot.png" alt="claude-sketch：足迹、注意力占比、文件热度">
 </picture>
 
 

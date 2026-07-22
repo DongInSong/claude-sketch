@@ -4,3 +4,7 @@
 * text=auto eol=lf
 *.png binary
 *.woff2 binary
+
+# a gif normalised as text is a corrupt gif; every other binary here is
+# already spelled out, this one was simply missed
+*.gif binary

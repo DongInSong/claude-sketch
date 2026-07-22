@@ -12,13 +12,13 @@ npx claude-sketch
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot.png" alt="claude-sketch: 足あと・注目シェア・ファイル熱量">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
+  <img src="docs/live.gif" alt="読み、そして二度の編集 — マークと矢印、その場で増える行数">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="読み、そして二度の編集 — マークと矢印、その場で増える行数">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot.png" alt="claude-sketch: 足あと・注目シェア・ファイル熱量">
 </picture>
 
 

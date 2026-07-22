@@ -12,13 +12,13 @@ npx claude-sketch
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot.png" alt="claude-sketch: 발자국, 주목 점유율, 파일 히트">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
+  <img src="docs/live.gif" alt="읽기, 그리고 두 번의 수정 — 마크와 화살표, 실시간으로 오르는 줄 수">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/live-dark.gif">
-  <img src="docs/live.gif" alt="읽기, 그리고 두 번의 수정 — 마크와 화살표, 실시간으로 오르는 줄 수">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot.png" alt="claude-sketch: 발자국, 주목 점유율, 파일 히트">
 </picture>
 
 
