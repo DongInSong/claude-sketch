@@ -260,6 +260,16 @@
   .band{font-size:13px;color:var(--ink3);border:1.7px dashed var(--ink3);opacity:.55;
     border-radius:10px 14px 11px 15px / 14px 11px 15px 10px;padding:1px 9px;white-space:nowrap;flex:none}
   .band.wide{width:100%;text-align:center;padding:2px 0}
+  /* An untouched stretch used to cost a line of text each, and on a long session
+     that was 39 of them against 46 rows that actually had files — half the panel
+     saying nothing but a number. It is a rule now, as long as what it stands for:
+     a single folder is a tick, eight hundred runs the width of the panel. The
+     counts are still there, on hover. */
+  /* flex:none, not a basis: the panel is a column, so a flex-basis would be read
+     as the height and swallow the one set here */
+  .gap{flex:none;width:100%;height:11px;display:flex;align-items:center;justify-content:center}
+  .gap i{display:block;height:0;border-top:1.7px dashed var(--ink3);border-radius:99px;
+    filter:url(#squiggle)}
   .mc{width:22px;height:22px;border:1.7px solid var(--ink3);position:relative;flex:none;
     border-radius:6px 9px 7px 10px / 9px 7px 10px 6px}
   .mc.un{border-style:dashed;opacity:.4}
@@ -1753,13 +1763,19 @@ function updateFog(){
   let quietFiles = 0, quietDirs = [];
   const flushQuiet = ()=>{
     if (!quietFiles) return;
-    const band = document.createElement('span');
-    band.className = 'band wide';
-    band.textContent = t('quietBand', {n: quietFiles.toLocaleString(), m: quietDirs.length});
-    band.dataset.tip = tipBox(t('quietBandTitle'),
+    const gap = document.createElement('span');
+    gap.className = 'gap';
+    // log, because these run from one folder to eight hundred and a linear rule
+    // would make everything below a hundred look identical
+    const span = Math.min(100, 10 + 24 * Math.log10(1 + quietFiles));
+    const rule = document.createElement('i');
+    rule.style.width = span.toFixed(1) + '%';
+    rule.style.opacity = (0.3 + span / 320).toFixed(2);
+    gap.appendChild(rule);
+    gap.dataset.tip = tipBox(t('quietBandTitle'),
       [[t('lblFiles'), quietFiles.toLocaleString()], [t('lblUnexplored'), String(quietDirs.length)]],
       {note: quietDirs.slice(0,6).join(', ') + (quietDirs.length>6?', …':'')});
-    frag.appendChild(band);
+    frag.appendChild(gap);
     quietFiles = 0; quietDirs = [];
   };
 
