@@ -3212,7 +3212,14 @@ function renderAgents(){
       const dur = Math.max(paired, span);
       const started = tk.start || a.firstTs;
       const stillMoving = a.lastTs && Date.now() - a.lastTs < 2*60e3;
-      const running = !tk.end && stillMoving;
+      // A subagent can keep working after its first Task returns — resumed by the
+      // parent, or running on past the result that unblocked it — and its
+      // transcript goes on growing while tk.end (that first result) stays put. So
+      // it is not "done" the moment the Task comes back; it is done when it falls
+      // quiet. Ops after tk.end mean it is going again, whatever the Task says —
+      // else its span kept growing under a "done in 29m…" that never settled.
+      const resumed = a.lastTs && tk.end && a.lastTs > tk.end;
+      const running = stillMoving && (!tk.end || resumed);
       const bits = [];
       if (tk.desc) bits.push(`<span class="q">“${esc(tk.desc)}”</span>`);
       if (running) bits.push(`<span class="run">${t('taskRun')}</span>`);
