@@ -353,6 +353,12 @@
     background:repeating-linear-gradient(to right,
       color-mix(in srgb, var(--ink3) 38%, transparent) 0 1.6px, transparent 1.6px var(--step));
     filter:url(#squiggle)}
+  /* a folder searched as a whole wears the grep colour on its label, led by a
+     small lens — the treemap shows it as a tile, this is its footprint here */
+  .fgrow .ilab.searched{color:var(--op-grep)}
+  .fsic{color:var(--op-grep);font-weight:700;pointer-events:none}
+  .fgrow .ilab .fsic{margin-right:3px}
+  #covSearch{color:var(--op-grep);white-space:nowrap}
   .fgcells{display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0}
   .band{font-size:13px;color:var(--ink3);border:1.7px dashed var(--ink3);opacity:.55;
     border-radius:10px 14px 11px 15px / 14px 11px 15px 10px;padding:1px 9px;white-space:nowrap;flex:none}
@@ -569,7 +575,7 @@
 
   <section data-key="fog">
     <h2 data-i18n="fogTitle"></h2>
-    <p class="hint"><span id="fogLegend"></span> <b id="cov">–</b><span id="covNote"></span></p>
+    <p class="hint"><span id="fogLegend"></span> <b id="cov">–</b><span id="covNote"></span><span id="covSearch"></span></p>
     <p class="rootnote" id="rootNote" hidden></p>
     <div class="livewrap"><div id="fogMap"></div><canvas class="livecv" id="fogNow"></canvas></div>
     <p class="nofiles" id="noFiles" hidden></p>
@@ -653,6 +659,7 @@ const I18N = {
     mainRun:'working', mainIdle:'idle', lastDo:'last {op} {f}', spanFor:'{d} of work',
     secFold:'click to fold',
     openTip:'click to open', openFail:'could not open — {e}',
+    dirSearched:'searched', projSearchedNote:'the whole project was searched',
     noFilesYet:'<b>{n} calls, no files touched.</b> Shell commands and task spawns don\'t point at a file, so nothing is mapped yet — the maps fill in on the first read/edit/search.',
     lblModel:'model', lblCalls:'calls', lblIn:'tokens in', lblOut:'tokens out',
     flagFilterOn:'click to show every agent', flagFilterOff:'click to show only this agent',
@@ -728,6 +735,7 @@ const I18N = {
     mainRun:'작업 중', mainIdle:'대기', lastDo:'마지막 {op} {f}', spanFor:'누적 {d}',
     secFold:'클릭하면 접기',
     openTip:'클릭하면 열기', openFail:'열 수 없음 — {e}',
+    dirSearched:'검색됨', projSearchedNote:'프로젝트 전체를 검색',
     noFilesYet:'<b>호출 {n}회, 접촉 파일 0개.</b> 셸 명령과 task 실행은 파일을 가리키지 않아 지도에 표시할 대상이 없습니다 — 첫 읽기·수정·검색이 일어나면 채워집니다.',
     lblModel:'모델', lblCalls:'호출', lblIn:'입력 토큰', lblOut:'출력 토큰',
     flagFilterOn:'클릭하면 전체 에이전트로', flagFilterOff:'클릭하면 이 에이전트만',
@@ -803,6 +811,7 @@ const I18N = {
     mainRun:'作業中', mainIdle:'待機', lastDo:'直近 {op} {f}', spanFor:'稼働 {d}',
     secFold:'クリックでたたむ',
     openTip:'クリックで開く', openFail:'開けません — {e}',
+    dirSearched:'検索済み', projSearchedNote:'プロジェクト全体を検索',
     noFilesYet:'<b>{n} 回の呼び出し、接触ファイル 0。</b> シェルコマンドと task 起動はファイルを指さないため、まだ地図に出るものがありません — 最初の読み取り・編集・検索で埋まります。',
     lblModel:'モデル', lblCalls:'呼び出し', lblIn:'入力トークン', lblOut:'出力トークン',
     flagFilterOn:'クリックで全エージェント表示', flagFilterOff:'クリックでこのエージェントのみ',
@@ -878,6 +887,7 @@ const I18N = {
     mainRun:'工作中', mainIdle:'空闲', lastDo:'刚刚 {op} {f}', spanFor:'累计 {d}',
     secFold:'点击折叠',
     openTip:'点击打开', openFail:'无法打开 — {e}',
+    dirSearched:'已搜索', projSearchedNote:'搜索了整个项目',
     noFilesYet:'<b>{n} 次调用，未接触任何文件。</b> Shell 命令和 task 启动并不指向文件，因此地图上暂时没有内容 — 第一次读取／编辑／搜索后就会填上。',
     lblModel:'模型', lblCalls:'调用', lblIn:'输入 token', lblOut:'输出 token',
     flagFilterOn:'点击显示全部智能体', flagFilterOff:'点击只看这个智能体',
@@ -2330,8 +2340,19 @@ function updateFog(){
   dropGeom();                          // the boxes the live layer measures are about to be replaced
   const box = $('fogMap');
   const nowIx = Math.floor(Date.now()/BUCKET);
+  const tree = fogTree();
+  // A grep can take a whole folder (its key is a directory) or the whole project
+  // (key '(project)') instead of a file. Those have no cell to land on, so the
+  // footprints dropped them while the treemap showed them. Route the folder ones
+  // to their row's own label and the project-wide one to the coverage line, and
+  // keep them out of the per-file hits so they raise no phantom cell.
+  const dirSet = new Set(tree.map(([d]) => d));
+  const searchedDirs = new Map();     // dir path -> its grep entry: the folder itself was searched
+  let projSearch = null;              // a project-wide grep, no path
   const hitsByDir = new Map();
   for (const [p,fs] of S.files){
+    if (dirSet.has(p)){ searchedDirs.set(p, fs); continue; }
+    if (p === '(project)'){ projSearch = fs; continue; }
     const d = dirOf(p);
     if (!hitsByDir.has(d)) hitsByDir.set(d, []);
     hitsByDir.get(d).push([p,fs]);
@@ -2397,7 +2418,6 @@ function updateFog(){
   // above that stays absolute: started in a repo's bin/, the whole of lib/,
   // public/ and test/ is absolute and is the project. Folding on the path shape
   // alone hid all of it. With no shared prefix to judge against, nothing folds.
-  const tree = fogTree();
   const away = (d) => !!ROOT && d.startsWith('/') && !d.startsWith(ROOT + '/') && d !== ROOT;
   const awayRows = tree.filter(([d]) => away(d) && (hitsByDir.get(d) || []).length).length;
   const touchedRows = tree.filter(([d]) => (hitsByDir.get(d) || []).length).length;
@@ -2406,12 +2426,13 @@ function updateFog(){
 
   for (const [dir, names] of tree){
     const hits = hitsByDir.get(dir) || [];
-    if (folding && away(dir)){
+    const dsearched = searchedDirs.has(dir);          // the folder itself was grep'd
+    if (folding && away(dir) && !dsearched){
       if (hits.length){ outFiles += hits.length; outDirs.push(dir+'/'); }
       else { quietFiles += names.length; quietDirs.push(dir+'/'); }
       continue;
     }
-    if (!hits.length){ quietFiles += names.length; quietDirs.push(dir+'/'); continue; }
+    if (!hits.length && !dsearched){ quietFiles += names.length; quietDirs.push(dir+'/'); continue; }
     flushQuiet();
     const named = names.slice().sort();
     const len = named.length;
@@ -2427,7 +2448,7 @@ function updateFog(){
     const row = document.createElement('div');
     row.className = 'fgrow';
     const lab = document.createElement('span');
-    lab.className = 'ilab';
+    lab.className = 'ilab' + (dsearched ? ' searched' : '');
     if (dir.startsWith('(')){
       lab.textContent = dir;
       shown = [];                                // a bucket breaks the run
@@ -2436,9 +2457,11 @@ function updateFog(){
       lab.style.setProperty('--depth', String(Math.min(c.indent, 6)));
       lab.textContent = (c.text || './') + '/';
     }
+    // a footprint on the folder itself: the grep marker leads its label
+    if (dsearched) lab.insertAdjacentHTML('afterbegin', '<span class="fsic" aria-hidden="true">⌕</span>');
     lab.dataset.tip = tipBox(dir+'/', [[t('lblFiles'), String(len)],
       [t('lblTouched'), String(hits.length)], [t('lblHits'), String(hits.reduce((a,[,f])=>a+f.total,0))]],
-      {note: t('openTip')});
+      {note: t('openTip'), flag: dsearched ? t('dirSearched') : null});
     if (!dir.startsWith('(')){
       lab.classList.add('openable');
       lab.addEventListener('click', (e)=> openTarget(dir, e));
@@ -2514,6 +2537,12 @@ function updateFog(){
     : UNIVERSE.truncated ? t('coverageCapped', {b:total, n:UNIVERSE.listed})
     : '';
   $('covNote').textContent = why ? ' · ' + why : '';
+  // a project-wide grep has no folder to sit in — it says so beside the count
+  const cs = $('covSearch');
+  if (projSearch){
+    cs.innerHTML = ' · <span class="fsic" aria-hidden="true">⌕</span>' + projSearch.total;
+    cs.dataset.tip = tipBox('(project)', [[t('lblHits'), String(projSearch.total)]], {note: t('projSearchedNote')});
+  } else { cs.textContent = ''; delete cs.dataset.tip; }
 }
 
 /* ══ treemap — crayon ══ */
