@@ -244,3 +244,31 @@ test('web search and fetch are web activity, not grep', () => {
   const f = op('WebFetch', { url: 'https://example.com/docs' });
   assert.equal(f.op, 'web'); assert.equal(f.file, 'https://example.com/docs');
 });
+
+// A question with a screenshot attached arrives as text + image blocks, not a
+// string, so the string-only reader missed it and the title stalled on the last
+// text-only question — then took turns with the poll, which read it off last-prompt.
+test('a prompt with an image attached still titles the session', () => {
+  const p = new SessionParser('/r');
+  p.parseLine({ type: 'user', timestamp: '2026-01-01T00:00:00Z',
+    message: { role: 'user', content: 'first question' } }, 'main');
+  p.parseLine({ type: 'user', timestamp: '2026-01-01T00:01:00Z',
+    message: { role: 'user', content: [{ type: 'text', text: 'the newest question with a shot' },
+      { type: 'image', source: {} }] } }, 'main');
+  assert.equal(p.title, 'the newest question with a shot',
+    'an image-attached prompt was invisible, so the title stalled on the older text-only one');
+});
+
+// A subagent's transcript opens with the brief the main handed it — a real
+// user-role message. Read as a prompt it became the session title (main's
+// instruction to a worker), not the user's own question.
+test('a subagent brief opens its turn but does not title the session', () => {
+  const p = new SessionParser('/r');
+  p.parseLine({ type: 'user', timestamp: '2026-01-01T00:00:00Z',
+    message: { role: 'user', content: 'the user question' } }, 'main');
+  const evs = p.parseLine({ type: 'user', timestamp: '2026-01-01T00:05:00Z',
+    message: { role: 'user', content: 'scope=frontend. do the thing I told you' } }, 'ws3');
+  assert.equal(p.title, 'the user question', 'the subagent brief must not overwrite the user question');
+  assert.ok(evs.some(e => e.t === 'open' && e.agent === 'ws3'), 'but it still opens the subagent’s turn');
+  assert.ok(!evs.some(e => e.t === 'title'), 'and emits no title event');
+});
