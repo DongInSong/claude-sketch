@@ -2366,9 +2366,10 @@ const DOO = { act: null, prev: null, flipAt: 0 };
 const dooBusy = () => !!(DOO.act || DOO.prev);
 const CHIT = 30;              // the square of coloured paper
 const FLIP_MS = 260;          // how long a change takes to flip over
-const STOP_MS = 170;          // frame step of the stop-motion flutter
-// three poses it snaps between — a paper sticker never sits quite still
-const POSES = [[0, 0, 0], [0.05, 0.8, -0.6], [-0.035, -0.7, 0.8]];
+const STOP_MS = 210;          // frame step of the stop-motion flutter
+// four poses it drifts through — a gentle bob, barely any spin, so it flutters
+// rather than twitches [rot, dx, dy]
+const POSES = [[0.008, 0.2, -0.2], [-0.006, -0.2, 0.1], [0.010, 0.1, 0.3], [-0.004, 0.3, -0.1]];
 // 1 → 0 → 1 in a few hard steps, so the flip reads as stop-motion, not a spin
 const FLIP_SEQ = [1, 0.62, 0.16, 0.16, 0.62, 1];
 const flipStep = p => FLIP_SEQ[Math.min(FLIP_SEQ.length-1, Math.floor(p * (FLIP_SEQ.length-1) + 1e-6))];
@@ -2393,11 +2394,10 @@ function drawPaper(c, cx, cy, act){
   c.restore();
 }
 
-// the word ending at rightX, each letter kicked off the line — a rascal's hand
-function drawWord(c, word, rightX, cy, col){
+// the word starting at leftX, each letter kicked off the line — a rascal's hand
+function drawWord(c, word, leftX, cy, col){
   c.font = '800 16px ' + handFont();
-  const total = c.measureText(word).width + word.length * 1.5;
-  let x = rightX - total;
+  let x = leftX;
   c.save(); c.fillStyle = col; c.textBaseline = 'middle'; c.textAlign = 'left';
   for (let i = 0; i < word.length; i++){
     const ch = word[i], cw = c.measureText(ch).width, rnd = mulberry(hash(word) + i*131);
@@ -2406,8 +2406,9 @@ function drawWord(c, word, rightX, cy, col){
     x += cw + 1.5;
   }
   c.restore();
-  return total;
+  return x - leftX;   // width drawn
 }
+const wordWidth = (c, word) => { c.font = '800 16px ' + handFont(); return c.measureText(word).width + word.length * 1.5; };
 
 function drawDoodle(){
   const cv = $('doodle'); if (!cv) return;
@@ -2425,22 +2426,28 @@ function drawDoodle(){
   const show = (flipP < 0.5 && DOO.prev) ? DOO.prev : DOO.act;   // swap at the narrowest point of the flip
   if (!show) return;
 
-  // level with main's row, hard against the right edge — a sticker on the line
+  // just past the end of main's row — the word, then the paper — so it sits close
+  // to the counts rather than out at the far edge
   const cr = cv.getBoundingClientRect();
-  const row = document.querySelector('#agents .agl');
-  let cy = 22;
-  if (row){ const r0 = row.getBoundingClientRect(); cy = r0.top - cr.top + r0.height/2; }
-  const chitCX = W - 14 - CHIT/2;
+  const tk = document.querySelector('#agents .agl .tk') || document.querySelector('#agents .agl');
+  let endX = W - 200, cy = 22;
+  if (tk){ const r0 = tk.getBoundingClientRect(); endX = r0.right - cr.left; cy = r0.top - cr.top + r0.height/2; }
+  const word = ACT_WORD(show);
+  const ww = wordWidth(c, word), groupW = ww + 9 + CHIT;
+  let leftX = endX + 16;
+  if (leftX + groupW > W - 6) leftX = W - 6 - groupW;    // clamp if the row runs wide
+  const chitCX = leftX + ww + 9 + CHIT/2;
+  const pivotX = leftX + groupW/2;
 
   const pose = POSES[Math.floor(now / STOP_MS) % POSES.length];
   const flipS = flipStep(flipP);
   c.save();
-  c.translate(chitCX + pose[1], cy + pose[2]);
-  c.rotate(-0.16 + pose[0]);           // sits askew
+  c.translate(pivotX + pose[1], cy + pose[2]);
+  c.rotate(-0.14 + pose[0]);           // sits askew
   c.scale(flipS, 1);                   // flips on a change
-  c.translate(-chitCX, -cy);
+  c.translate(-pivotX, -cy);
+  drawWord(c, word, leftX, cy, ACT_COL(show));
   drawPaper(c, chitCX, cy, show);
-  drawWord(c, ACT_WORD(show), chitCX - CHIT/2 - 8, cy, ACT_COL(show));
   c.restore();
 }
 
