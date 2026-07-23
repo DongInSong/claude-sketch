@@ -302,8 +302,11 @@
 
   .statline{margin:8px 0 0;color:var(--ink2);font-size:17px;font-variant-numeric:tabular-nums}
   .statline b{color:var(--ink)}
-  /* the crayon doodle: what main is doing right now, drawn beside the agents */
-  .doodle{display:block;width:100%;max-width:230px;height:30px;margin:6px 0 0}
+  /* the crayon doodle: what main is doing right now, stamped into the empty
+     space by the agents — an overlay, so it takes no room and pushes nothing */
+  .agentsbox{position:relative}
+  .doodle{position:absolute;top:-6px;right:2px;width:150px;height:52px;pointer-events:none;z-index:3}
+  @media (max-width:640px){ .doodle{width:120px;height:44px} }
   .statline .alert{color:var(--bad);font-weight:700}
   .costline{font-size:15px;margin-top:3px;color:var(--ink3)}
   .costline .hint2{color:var(--ink3);font-size:13.5px}
@@ -569,8 +572,10 @@
     <span id="sessLinks"></span>
   </div>
 
-  <div class="agents" id="agents"></div>
-  <canvas id="doodle" class="doodle" aria-hidden="true"></canvas>
+  <div class="agentsbox">
+    <div class="agents" id="agents"></div>
+    <canvas id="doodle" class="doodle" aria-hidden="true"></canvas>
+  </div>
   <p class="statline" id="statline"></p>
   <p class="statline costline" id="costline"></p>
 
@@ -2383,20 +2388,21 @@ function drawDoodle(){
   const want = (main && main.lastTs && now - main.lastTs < NOW_MS) ? (main.lastAct || main.lastOp) : null;
   if (want !== DOO.act){ if (DOO.act){ DOO.prev = DOO.act; DOO.prevAt = now; } DOO.act = want; DOO.born = now; }
   if (DOO.prev && now - DOO.prevAt >= ERASE_MS) DOO.prev = null;
-  const r = Math.min(H*0.34, 12), gx = 6 + r, cy = H/2;
+  const r = Math.min(H*0.4, 15), gx = 9 + r, cy = H/2 + 1;
   // the one on its way out, being rubbed out
   if (DOO.prev){
     drawGlyph(c, DOO.prev, gx, cy, r, 1);
-    rubOut(c, { x: gx-r-5, y: cy-r-5, w: 2*r+10, h: 2*r+10 }, hash(DOO.prev)+9, (now-DOO.prevAt)/ERASE_MS);
+    rubOut(c, { x: gx-r-6, y: cy-r-6, w: 2*r+12, h: 2*r+12 }, hash(DOO.prev)+9, (now-DOO.prevAt)/ERASE_MS);
   }
-  // the current one, drawing in and wobbling, with its word beside it
+  // the current one, stamped in at a tilt, drawing on and wobbling, word beside it
   if (DOO.act){
     const prog = dooEase(Math.min(1, (now-DOO.born)/DOO_MS));
     const sh = shake();
-    c.save(); c.translate(sh.x, sh.y); c.rotate(sh.a);
+    c.save();
+    c.translate(gx + sh.x, cy + sh.y); c.rotate(-0.09 + sh.a); c.translate(-gx, -cy);
     drawGlyph(c, DOO.act, gx, cy, r, prog);
     c.globalAlpha = prog; c.fillStyle = ACT_COL(DOO.act);
-    c.font = '700 15px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
+    c.font = '700 16px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
     c.textAlign = 'left'; c.textBaseline = 'middle';
     c.fillText(ACT_WORD(DOO.act), gx + r + 7, cy + 1);
     c.restore();
