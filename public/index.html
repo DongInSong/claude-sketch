@@ -1114,6 +1114,12 @@ function applyEvent(ev, silent, replay){
     return;
   }
   if (ev.t === 'title'){ const s = SESSIONS.find(x=>x.id===S.id); if (s){ s.title = ev.title; renderSessLinks(); } return; }
+  // The turn opened (a prompt owes a reply) or closed (end_turn). This is the
+  // live "working" signal for the session on screen — it holds through a think
+  // that writes nothing, and drops the moment the turn ends, without waiting on
+  // the /sessions poll. Not stored with the marks, so a filter rebuild leaves it.
+  if (ev.t === 'open'){ agentOf(ev.agent).turnOpen = true; return; }
+  if (ev.t === 'end'){ agentOf(ev.agent).turnOpen = false; return; }
   if (!replay && (ev.t === 'op' || ev.t === 'res')){
     // A dropped connection reconnects to a server that starts its backlog from
     // the top, so everything already on screen arrives a second time. Counting
@@ -1161,6 +1167,7 @@ function applyEvent(ev, silent, replay){
   if (ev.t !== 'op') return;
   const a = agentOf(ev.agent); a.count++;
   a.lastTs = ev.ts; a.lastOp = ev.op; a.lastFile = ev.file;
+  if (!replay) a.turnOpen = true;          // a tool call means the turn is still open; a rebuild must not revive a closed one
   if (!a.firstTs || ev.ts < a.firstTs) a.firstTs = ev.ts;
   if (!S.firstTs || ev.ts < S.firstTs) S.firstTs = ev.ts;
   if (!replay) S.lastAny = ev;
@@ -1581,14 +1588,14 @@ document.addEventListener('mousemove', e=>{
   const above = e.clientY-th-12, below = e.clientY+16;
   dtip.style.top = Math.max(4, above < 4 ? Math.min(below, vh-th-6) : above)+'px';
 });
-// Two signals decide "working", because neither is enough alone. A tool call
-// arriving over the event stream says so instantly — but tool calls sit further
-// apart than they look: measured across real sessions, 10–27% of the gaps
-// between them run past 45s while Claude is thinking or writing a long answer.
-// The server's flag comes from the transcript still growing, which covers
-// exactly those stretches, at the cost of up to one poll of lag. Either means
-// working; only both quiet means idle.
-const BUSY_MS = 45000;                     // no tool call for this long → look at the file instead
+// "Working" is read from whose turn it is, not from the clock. The parser marks
+// the turn open when a prompt lands and closed on end_turn, so the session on
+// screen (see isLive) flips the instant work starts or stops — including through
+// a long think or a streamed answer, when no tool call is arriving to prove it.
+// mtime alone could not: it read a long think as idle and a just-finished turn
+// as busy for a further 45s. A subagent, which has no such turn of its own, is
+// still judged by how lately it last did anything.
+const BUSY_MS = 45000;                     // a subagent quiet this long reads as done
 const NOW_MS = 20000;   // how long a highlight stays up — the same everywhere, so
                         // one event does not vanish from one panel while it sits in another
 const WARM_MS = 90000;                     // touched-lately files keep a quiet ring
@@ -2978,13 +2985,16 @@ function fmtAgo(ms){
   const h = Math.round(m/60);
   return h < 24 ? t('agoH', {n:h}) : t('agoD', {n:Math.round(h/24)});
 }
-// A recent tool call means working, and it arrives instantly. When there has not
-// been one for a while that is not idle yet — see BUSY_MS — so fall through to
-// whether the transcript itself is still growing.
+// The session on screen carries a live turn signal off the event stream: the
+// parser opens the turn when a prompt lands and closes it on end_turn, so this
+// flips the instant work starts or stops — right through a long think that puts
+// no tool call on the wire. Everything else (other sessions, and the moment
+// after a turn ends before the turn signal is trusted) rides the server flag,
+// which reads the same turn state from the file's tail on the /sessions poll.
 function isLive(sess){
   if (S && S.id === sess.id && S.ready){
     const main = S.agents.get('main');
-    if (main && main.lastTs && Date.now() - main.lastTs < BUSY_MS) return true;
+    if (main && main.turnOpen) return true;
   }
   return !!sess.active;
 }

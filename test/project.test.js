@@ -41,9 +41,13 @@ test('CLAUDE_CONFIG_DIR decides where the transcripts are looked for', (t) => {
   assert.equal(found.sessions, 1);
 });
 
-// Nothing is written to a transcript while a tool runs, so a long call looks
-// exactly like a finished session if all you have is the file's mtime.
-test('a tool call still out means working, however long the file has sat still', (t) => {
+// Nothing is written to a transcript while a tool runs or the model thinks, so
+// a busy session looks exactly like a finished one if all you have is the file's
+// mtime. "Working" is read from whose turn it is: the assistant owes output —
+// from a prompt or a tool result until it writes an end_turn — even when the
+// file has gone perfectly quiet. Only an end_turn (or a turn abandoned so long
+// it must be a crash) is idle.
+test('working is read from whose turn it is, not from the file clock', (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-busy-'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-busyroot-'));
   const was = process.env.CLAUDE_CONFIG_DIR;
@@ -58,29 +62,51 @@ test('a tool call still out means working, however long the file has sat still',
   const dir = path.join(home, 'projects', slugOf(root));
   fs.mkdirSync(dir, { recursive: true });
   const call = (id, at) => JSON.stringify({ type: 'assistant', timestamp: new Date(at).toISOString(),
-    message: { id: 'm' + id, model: 'opus',
+    message: { id: 'm' + id, model: 'opus', stop_reason: 'tool_use',
       content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'sleep 300' } }] } }) + '\n';
   const result = (id, at) => JSON.stringify({ type: 'user', timestamp: new Date(at).toISOString(),
-    message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } }) + '\n';
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } }) + '\n';
+  const answer = (at) => JSON.stringify({ type: 'assistant', timestamp: new Date(at).toISOString(),
+    message: { id: 'a' + at, model: 'opus', stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'done' }] } }) + '\n';
+  const prompt = (at) => JSON.stringify({ type: 'user', timestamp: new Date(at).toISOString(),
+    message: { role: 'user', content: 'do the thing' } }) + '\n';
 
-  // three sessions, none of them written to for five minutes
-  const long = Date.now() - 5 * 60e3;
+  const now = Date.now();
+  const mins = (n) => now - n * 60e3;
   const write = (name, body, mtime) => {
     const fp = path.join(dir, name + '.jsonl');
     fs.writeFileSync(fp, body);
     fs.utimesSync(fp, new Date(mtime), new Date(mtime));   // pretend it went quiet
     return fp;
   };
-  write('aaa', call('t1', Date.now() - 90e3), long);                    // call still out, started 90s ago
-  write('bbb', call('t2', long) + result('t2', long), long);            // call came back, then silence
-  write('ccc', call('t3', Date.now() - 40 * 60e3), Date.now() - 40 * 60e3);  // killed mid-call, 40min ago
+  // a tool call still out — a long Bash, quiet 5min but the call has not returned
+  write('open-call', call('t1', now - 90e3), mins(5));
+  // a tool result came back, then quiet: the assistant is thinking about it (the
+  // false-idle this whole change is about — a Sublimating turn with no writes)
+  write('thinking', call('t2', mins(2)) + result('t2', mins(2)), mins(2));
+  // a fresh prompt with no reply yet, quiet 2min: thinking before its first tool
+  write('from-prompt', prompt(mins(2)), mins(2));
+  // the assistant answered and stopped — genuinely finished, quiet 5min
+  write('finished', call('t3', mins(5)) + result('t3', mins(5)) + answer(mins(5)), mins(5));
+  // just wrote end_turn this instant: the file is fresh, but the turn is over —
+  // mtime alone read this as busy for a further 45s
+  write('just-done', call('t4', now - 3e3) + result('t4', now - 2e3) + answer(now - 1e3), now);
+  // a turn left open far too long to be a think — a crash mid-turn
+  write('abandoned', call('t5', mins(40)) + result('t5', mins(40)), mins(40));
 
   const by = new Map(new Project(root).list().sessions.map(s => [s.id, s]));
-  assert.equal(by.get('aaa').active, true,
+  assert.equal(by.get('open-call').active, true,
     'a tool call running for 90s read as idle — the file has not moved, but the work has not stopped');
-  assert.equal(by.get('bbb').active, false, 'a finished session should not read as working');
-  assert.equal(by.get('ccc').active, false,
-    'a session killed mid-call would claim to be working for ever');
+  assert.equal(by.get('thinking').active, true,
+    'a turn owing a reply after a tool result read as idle — that is exactly the Sublimating-but-idle bug');
+  assert.equal(by.get('from-prompt').active, true,
+    'a prompt with no reply yet read as idle while the assistant was thinking toward its first tool call');
+  assert.equal(by.get('finished').active, false, 'a session that wrote end_turn should not read as working');
+  assert.equal(by.get('just-done').active, false,
+    'a turn that just ended still read as busy — the end_turn only just moved the file');
+  assert.equal(by.get('abandoned').active, false,
+    'a turn left open for 40min is a crash, not a think, and would claim to be working for ever');
 });
 
 // Claude Code records the folder it was started in, which is often a corner of
@@ -426,4 +452,58 @@ test('the file universe counts untracked files but not ignored ones', async (t) 
     'ignored files leaked into the project file list');
   assert.equal(u.truncated, undefined);
   assert.equal(u.total, u.files.length);
+});
+
+// Claude Code writes local slash-command records into a transcript on the user
+// role — a caveat (isMeta), then <command-name>/<local-command-stdout> lines
+// whose text is pure wrapper — and it does this to sessions that finished long
+// ago, refreshing the mtime. They are neither turns nor prompts: taken as a
+// turn, a dead session read as working; taken as a title, the real prompt was
+// hidden and the panel fell back to the session id.
+test('local-command records are neither a turn nor a title', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-cmd-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-cmdroot-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const dir = path.join(home, 'projects', slugOf(root));
+  fs.mkdirSync(dir, { recursive: true });
+
+  const now = Date.now();
+  const iso = (at) => new Date(at).toISOString();
+  const prompt = (at, text) => JSON.stringify({ type: 'user', timestamp: iso(at),
+    message: { role: 'user', content: text } }) + '\n';
+  const answer = (at) => JSON.stringify({ type: 'assistant', timestamp: iso(at),
+    message: { id: 'a' + at, model: 'opus', stop_reason: 'end_turn', content: [{ type: 'text', text: 'done' }] } }) + '\n';
+  const caveat = (at) => JSON.stringify({ type: 'user', isMeta: true, timestamp: iso(at),
+    message: { role: 'user', content: '<local-command-caveat>Caveat: generated while running local commands. DO NOT respond.</local-command-caveat>' } }) + '\n';
+  const cmd = (at) => JSON.stringify({ type: 'user', timestamp: iso(at),
+    message: { role: 'user', content: '<command-name>/design-login</command-name>\n<command-args></command-args>' } }) + '\n';
+  const cmdOut = (at) => JSON.stringify({ type: 'user', timestamp: iso(at),
+    message: { role: 'user', content: '<local-command-stdout>Design-system access authorized.</local-command-stdout>' } }) + '\n';
+
+  const write = (name, body, mtime) => {
+    const fp = path.join(dir, name + '.jsonl');
+    fs.writeFileSync(fp, body);
+    fs.utimesSync(fp, new Date(mtime), new Date(mtime));
+  };
+  // finished 40min ago (prompt → end_turn), then command records land 1min ago —
+  // fresh mtime, but the session is done and its title is the prompt.
+  write('finished', prompt(now - 40 * 60e3, 'real question here') + answer(now - 40 * 60e3 + 1000)
+    + caveat(now - 60e3) + cmd(now - 60e3) + cmdOut(now - 60e3), now - 60e3);
+  // a session that only ever ran a command — no real turn at all
+  write('cmdonly', caveat(now - 60e3) + cmd(now - 60e3) + cmdOut(now - 60e3), now - 60e3);
+
+  const by = new Map(new Project(root).list().sessions.map(s => [s.id, s]));
+  assert.equal(by.get('finished').active, false,
+    'a finished session read as working because a fresh local-command record looked like a new turn');
+  assert.equal(by.get('finished').title, 'real question here',
+    'the command record hid the real prompt, so the panel fell back to the id');
+  assert.equal(by.get('cmdonly').active, false,
+    'a command-only session has no real turn and is not working');
 });

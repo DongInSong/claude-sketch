@@ -130,3 +130,51 @@ test('a result reports how many lines came back, whatever shape it arrives in', 
   assert.equal(res('').rows, 0);
   assert.equal(res(undefined).rows, 0, 'a result with no content at all');
 });
+
+// The turn signal drives the live "working" badge. A prompt (typed or queued)
+// opens the turn — the assistant owes a reply and is working before it has made
+// a single tool call — and an end_turn closes it. Anything else leaves it open.
+test('a prompt opens the turn and end_turn closes it', () => {
+  const p = new SessionParser('/r');
+  const turns = (line) => p.parseLine(line, 'main').filter(e => e.t === 'open' || e.t === 'end');
+
+  const typed = turns({ type: 'user', timestamp: '2026-01-01T00:00:00Z',
+    message: { role: 'user', content: 'do the thing' } });
+  assert.deepEqual(typed, [{ t: 'open', agent: 'main', ts: Date.parse('2026-01-01T00:00:00Z') }],
+    'a typed prompt owes a reply — the turn is open before any tool call');
+
+  const queued = turns({ type: 'queue-operation', content: 'and this too', timestamp: '2026-01-01T00:00:05Z' });
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].t, 'open', 'a queued prompt opens the turn too');
+
+  // a tool_use assistant message is mid-turn: still open, no signal needed here
+  const toolCall = turns({ type: 'assistant', timestamp: '2026-01-01T00:00:06Z',
+    message: { id: 'm1', stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', id: 'a1', name: 'Read', input: { file_path: '/r/a.js' } }] } });
+  assert.deepEqual(toolCall, [], 'a tool call does not emit end — the turn is still the assistant’s');
+
+  const done = turns({ type: 'assistant', timestamp: '2026-01-01T00:00:07Z',
+    message: { id: 'm2', stop_reason: 'end_turn', content: [{ type: 'text', text: 'all done' }] } });
+  assert.deepEqual(done, [{ t: 'end', agent: 'main', ts: Date.parse('2026-01-01T00:00:07Z') }],
+    'end_turn hands the turn back to the user');
+});
+
+// Slash-command records ride in on the user role — a caveat (isMeta), then
+// <command-name>/<local-command-stdout> lines that clean to nothing. None of
+// them is a prompt the assistant answers, so none opens a turn.
+test('local-command records do not open a turn', () => {
+  const p = new SessionParser('/r');
+  const turns = (line) => p.parseLine(line, 'main').filter(e => e.t === 'open' || e.t === 'end');
+
+  assert.equal(turns({ type: 'user', timestamp: '2026-01-01T00:00:00Z',
+    message: { role: 'user', content: 'do the thing' } }).length, 1, 'a real prompt opens the turn');
+  assert.deepEqual(turns({ type: 'user', isMeta: true, timestamp: '2026-01-01T00:00:01Z',
+    message: { role: 'user', content: '<local-command-caveat>Caveat: …</local-command-caveat>' } }), [],
+    'the caveat (isMeta) opens nothing');
+  assert.deepEqual(turns({ type: 'user', timestamp: '2026-01-01T00:00:02Z',
+    message: { role: 'user', content: '<command-name>/design-login</command-name>' } }), [],
+    'the command record opens nothing');
+  assert.deepEqual(turns({ type: 'user', timestamp: '2026-01-01T00:00:03Z',
+    message: { role: 'user', content: '<local-command-stdout>ok</local-command-stdout>' } }), [],
+    'the command stdout opens nothing');
+});
