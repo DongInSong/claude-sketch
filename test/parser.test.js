@@ -272,3 +272,20 @@ test('a subagent brief opens its turn but does not title the session', () => {
   assert.ok(evs.some(e => e.t === 'open' && e.agent === 'ws3'), 'but it still opens the subagent’s turn');
   assert.ok(!evs.some(e => e.t === 'title'), 'and emits no title event');
 });
+
+// An ESC writes "[Request interrupted by user]" and a skill writes its brief —
+// both as array-content user messages (text blocks, no tool_result). The image
+// fix read array prompts, so these leaked in as titles; peekTail reads only
+// string content and never saw them, so the name changed on click.
+test('an interrupt marker and a skill brief do not become the title', () => {
+  const p = new SessionParser('/r');
+  p.parseLine({ type: 'user', timestamp: '2026-01-01T00:00:00Z',
+    message: { role: 'user', content: 'the real question' } }, 'main');
+  p.parseLine({ type: 'user', timestamp: '2026-01-01T00:01:00Z',
+    message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }, 'main');
+  assert.equal(p.title, 'the real question', 'an ESC interrupt marker overwrote the question');
+  p.parseLine({ type: 'user', isMeta: true, timestamp: '2026-01-01T00:02:00Z',
+    message: { role: 'user', content: [{ type: 'text', text: 'Approach this as the design lead' }] } }, 'main');
+  assert.equal(p.title, 'the real question', 'a skill brief (isMeta array) overwrote the question');
+  assert.equal(cleanPrompt('[Request interrupted by user for tool use]'), null, 'the marker cleans to nothing');
+});
