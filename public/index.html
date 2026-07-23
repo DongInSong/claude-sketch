@@ -305,8 +305,7 @@
   /* the crayon doodle: what main is doing right now, stamped into the empty
      space by the agents — an overlay, so it takes no room and pushes nothing */
   .agentsbox{position:relative}
-  .doodle{position:absolute;top:-6px;right:2px;width:150px;height:52px;pointer-events:none;z-index:3}
-  @media (max-width:640px){ .doodle{width:120px;height:44px} }
+  .doodle{position:absolute;left:0;top:-8px;width:100%;height:calc(100% + 8px);pointer-events:none;z-index:3}
   .statline .alert{color:var(--bad);font-weight:700}
   .costline{font-size:15px;margin-top:3px;color:var(--ink3)}
   .costline .hint2{color:var(--ink3);font-size:13.5px}
@@ -2376,6 +2375,27 @@ function drawGlyph(c, act, x, y, r, alpha){
 
 const DOO = { act: null, born: 0, prev: null, prevAt: 0 };
 const dooBusy = () => !!(DOO.act || DOO.prev);
+// a crayon arrow from the stamp back to the main label, arced over the row, so
+// the glyph floating in the empty space reads as "this is what main is doing"
+function doodleArrow(c, sx, sy, tx, ty, col, seed){
+  const mx = (sx + tx) / 2, my = Math.min(sy, ty) - 9;   // lift the midpoint into an arc
+  c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+  for (const [w, a, cc] of [[7, 0.7, PAL.paper], [2.4, 0.9, col]]){   // paper under, then ink
+    const rnd = mulberry(seed);                 // same seed → the two share the wobble
+    c.globalAlpha = a; c.strokeStyle = cc; c.lineWidth = w;
+    c.beginPath(); wavyLine(c, sx, sy, mx, my, rnd, 1.4); c.stroke();
+    c.beginPath(); wavyLine(c, mx, my, tx, ty, rnd, 1.4); c.stroke();
+  }
+  const rnd = mulberry(seed + 7);
+  const dx = tx - mx, dy = ty - my, len = Math.hypot(dx, dy) || 1, ux = dx/len, uy = dy/len;
+  c.strokeStyle = col; c.lineWidth = 2.4; c.globalAlpha = 0.9;
+  for (const ang of [2.5, -2.5]){                // two-stroke head at the tip
+    const hx = tx + (ux*Math.cos(ang) - uy*Math.sin(ang))*11;
+    const hy = ty + (ux*Math.sin(ang) + uy*Math.cos(ang))*11;
+    c.beginPath(); wavyLine(c, tx, ty, hx, hy, rnd, 1.2); c.stroke();
+  }
+  c.restore();
+}
 function drawDoodle(){
   const cv = $('doodle'); if (!cv) return;
   const W = cv.clientWidth, H = cv.clientHeight;
@@ -2388,16 +2408,27 @@ function drawDoodle(){
   const want = (main && main.lastTs && now - main.lastTs < NOW_MS) ? (main.lastAct || main.lastOp) : null;
   if (want !== DOO.act){ if (DOO.act){ DOO.prev = DOO.act; DOO.prevAt = now; } DOO.act = want; DOO.born = now; }
   if (DOO.prev && now - DOO.prevAt >= ERASE_MS) DOO.prev = null;
-  const r = Math.min(H*0.4, 15), gx = 9 + r, cy = H/2 + 1;
+  if (!DOO.act && !DOO.prev) return;
+
+  // where the "main" label sits, so the arrow can point back at it
+  const cr = cv.getBoundingClientRect();
+  const mb = document.querySelector('#agents .agl b');
+  let mainR = 44, mainY = 18;
+  if (mb){ const r0 = mb.getBoundingClientRect(); mainR = r0.right - cr.left; mainY = r0.top - cr.top + r0.height/2; }
+
+  const r = 15, cy = mainY, gx = W - 82;   // the stamp sits at the right, level with main's row
   // the one on its way out, being rubbed out
   if (DOO.prev){
     drawGlyph(c, DOO.prev, gx, cy, r, 1);
     rubOut(c, { x: gx-r-6, y: cy-r-6, w: 2*r+12, h: 2*r+12 }, hash(DOO.prev)+9, (now-DOO.prevAt)/ERASE_MS);
   }
-  // the current one, stamped in at a tilt, drawing on and wobbling, word beside it
+  // the current one: the arrow back to main, then the stamp, tilted and wobbling
   if (DOO.act){
     const prog = dooEase(Math.min(1, (now-DOO.born)/DOO_MS));
     const sh = shake();
+    c.save(); c.globalAlpha = prog;
+    doodleArrow(c, gx - r - 8 + sh.x, cy + sh.y, mainR + 7, mainY, ACT_COL(DOO.act), hash('arw' + DOO.act));
+    c.restore();
     c.save();
     c.translate(gx + sh.x, cy + sh.y); c.rotate(-0.09 + sh.a); c.translate(-gx, -cy);
     drawGlyph(c, DOO.act, gx, cy, r, prog);
