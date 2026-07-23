@@ -2460,13 +2460,32 @@ function drawDoodle(){
 
   const pose = POSES[Math.floor(now / STOP_MS) % POSES.length];
   const flipS = flipStep(flipP);
+  const tilt = -0.14 + pose[0];
+  // a soft crayon patch behind the whole thing, tilted with it but not flipped —
+  // so the paper reads as stuck onto a little coloured backing
   c.save();
-  c.translate(pivotX + pose[1], cy + pose[2]);
-  c.rotate(-0.14 + pose[0]);           // sits askew
-  c.scale(flipS, 1);                   // flips on a change
-  c.translate(-pivotX, -cy);
+  c.translate(pivotX + pose[1], cy + pose[2]); c.rotate(tilt); c.translate(-pivotX, -cy);
+  drawBackdrop(c, leftX - 9, chitCX + CHIT/2 + 7, cy, ACT_COL(show));
+  c.restore();
+  // the word and the paper, flipping over on a change
+  c.save();
+  c.translate(pivotX + pose[1], cy + pose[2]); c.rotate(tilt); c.scale(flipS, 1); c.translate(-pivotX, -cy);
   drawWord(c, word, leftX, cy, ACT_COL(show));
   drawPaper(c, chitCX, cy, show);
+  c.restore();
+}
+// a low, crayon-hatched wash the sticker sits on
+function drawBackdrop(c, x0, x1, cy, col){
+  const h = CHIT + 10, y = cy - h/2, w = x1 - x0;
+  c.save();
+  c.globalAlpha = 0.13; c.fillStyle = col;                       // the wash
+  c.beginPath(); c.roundRect(x0, y, w, h, 9); c.fill();
+  c.beginPath(); c.roundRect(x0, y, w, h, 9); c.clip();          // texture, clipped to it
+  c.globalAlpha = 0.09; c.strokeStyle = col; c.lineWidth = 4; c.lineCap = 'round';
+  const rnd = mulberry(1234);
+  c.beginPath();
+  for (let sx = x0 - h; sx < x1; sx += 7){ const j = (rnd()-0.5)*2.4; c.moveTo(sx+j, y+h); c.lineTo(sx+h+j, y); }
+  c.stroke();
   c.restore();
 }
 
