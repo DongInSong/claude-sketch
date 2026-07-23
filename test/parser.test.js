@@ -195,3 +195,52 @@ test('cleanPrompt drops system records, keeps what a person typed', () => {
     'scope=frontend, verify the build');
   assert.equal(cleanPrompt('배포 스크립트 좀 고쳐줘'), '배포 스크립트 좀 고쳐줘', 'a real prompt is untouched');
 });
+
+// Bash was one undifferentiated "run"; the command says which kind of work it is.
+test('Bash calls are classified by what the command does', () => {
+  const p = new SessionParser('/r');
+  const act = (command) => opsOf(p.parseLine({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { content: [{ type: 'tool_use', id: 'b' + Math.random(), name: 'Bash', input: { command } }] } },
+    'main'))[0];
+  assert.equal(act('git commit -m "x"').act, 'git');
+  assert.equal(act('gh pr create').act, 'git');
+  assert.equal(act('npm test').act, 'test');
+  assert.equal(act('pytest -q tests/').act, 'test');
+  assert.equal(act('node --test').act, 'test');
+  assert.equal(act('go test ./...').act, 'test');
+  assert.equal(act('npm run build').act, 'build');
+  assert.equal(act('make -j4').act, 'build');
+  assert.equal(act('tsc -p .').act, 'build');
+  assert.equal(act('npm install').act, 'install');
+  assert.equal(act('pip install requests').act, 'install');
+  assert.equal(act('ls -la && cat foo.txt').act, 'run');
+  const e = act('git status');
+  assert.equal(e.op, 'bash', 'the coarse op stays bash, so the file panels are unchanged');
+});
+
+// MCP tools used to be dropped entirely — a browser session, a DB query, a
+// service call all invisible. Now they are activities with a readable detail.
+test('MCP tools become visible activities with a readable detail', () => {
+  const p = new SessionParser('/r');
+  const op = (name, input) => opsOf(p.parseLine({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { content: [{ type: 'tool_use', id: 'm' + Math.random(), name, input }] } }, 'main'))[0];
+
+  const nav = op('mcp__plugin_playwright_playwright__browser_navigate', { url: 'http://localhost:3000/app' });
+  assert.equal(nav.op, 'browse'); assert.equal(nav.file, 'http://localhost:3000/app');
+  const click = op('mcp__plugin_playwright_playwright__browser_click', { ref: 'x' });
+  assert.equal(click.op, 'browse'); assert.equal(click.file, 'click', 'no url → the browser action');
+  const q = op('mcp__pms-postgres-prod__query', { sql: 'select *\n  from users' });
+  assert.equal(q.op, 'data'); assert.equal(q.file, 'select * from users');
+  const other = op('mcp__some_server__do_thing', {});
+  assert.equal(other.op, 'mcp'); assert.equal(other.file, 'some-server · do_thing');
+});
+
+test('web search and fetch are web activity, not grep', () => {
+  const p = new SessionParser('/r');
+  const op = (name, input) => opsOf(p.parseLine({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { content: [{ type: 'tool_use', id: 'w' + Math.random(), name, input }] } }, 'main'))[0];
+  const s = op('WebSearch', { query: 'vite pwa config' });
+  assert.equal(s.op, 'web'); assert.equal(s.act, 'web'); assert.equal(s.file, 'web: vite pwa config');
+  const f = op('WebFetch', { url: 'https://example.com/docs' });
+  assert.equal(f.op, 'web'); assert.equal(f.file, 'https://example.com/docs');
+});

@@ -1001,6 +1001,10 @@ const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const OP_LABEL = {read:'READ', grep:'GREP', edit:'EDIT', bash:'RUN', task:'TASK', del:'DEL'};
 const opCol = k => ({read:PAL.read,grep:PAL.grep,edit:PAL.edit,bash:PAL.bash,task:PAL.heat,del:PAL.del})[k] || PAL.ink3;
+// Ops that land on a file, so they wear a cell and a mark. The rest — bash, task,
+// web, browse, data, mcp, flow — are activity, not a place; they show in the
+// ticker and (soon) as the agent's doodle, but raise no cell in the footprints.
+const FILE_OPS = new Set(['read', 'grep', 'edit', 'del']);
 
 /* ══ helpers ══ */
 const $ = id => document.getElementById(id);
@@ -1176,7 +1180,7 @@ function applyEvent(ev, silent, replay){
   }
   if (ev.t !== 'op') return;
   const a = agentOf(ev.agent); a.count++;
-  a.lastTs = ev.ts; a.lastOp = ev.op; a.lastFile = ev.file;
+  a.lastTs = ev.ts; a.lastOp = ev.op; a.lastAct = ev.act || ev.op; a.lastFile = ev.file;
   if (!replay) a.turnOpen = true;          // a tool call means the turn is still open; a rebuild must not revive a closed one
   if (!a.firstTs || ev.ts < a.firstTs) a.firstTs = ev.ts;
   if (!S.firstTs || ev.ts < S.firstTs) S.firstTs = ev.ts;
@@ -1185,7 +1189,7 @@ function applyEvent(ev, silent, replay){
     S.tasks.set(ev.id, {desc: ev.desc || ev.file, sub: ev.sub, start: ev.ts, end: null, agent: null});
   S.opCount[ev.op] = (S.opCount[ev.op]||0)+1;
   S.lastEv = ev;
-  if (ev.op === 'bash' || ev.op === 'task') return;
+  if (!FILE_OPS.has(ev.op)) return;        // activity, not a file: no cell (bash/task/web/browse/data/mcp/flow)
   const fs = S.files.get(ev.file) || {ops:{read:0,grep:0,edit:0,del:0}, total:0, tokens:0,
     agents:new Set(), reads:0, firstIx:S.n++, delta:0, deltaT:0, hb:{}, hbo:{}, hbd:{}, plus:0, minus:0,
     gone:false, errs:0, lastErr:0};
