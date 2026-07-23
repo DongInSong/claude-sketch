@@ -178,3 +178,20 @@ test('local-command records do not open a turn', () => {
     message: { role: 'user', content: '<local-command-stdout>ok</local-command-stdout>' } }), [],
     'the command stdout opens nothing');
 });
+
+// System records ride in on the user/queue channel — a background-task
+// notification, a slash-command echo, a teammate hand-off. cleanPrompt used to
+// strip only their tags, leaving the ids and paths inside a <task-notification>
+// as a title like "b5alp9nx0 toolu_01… /tmp/…". Take the whole block instead.
+test('cleanPrompt drops system records, keeps what a person typed', () => {
+  const notif = '<task-notification>\n<task-id>bs35z6i31</task-id>\n'
+    + '<tool-use-id>toolu_01NXe1va3SoK2QMWqaZvEYu7</tool-use-id>\n'
+    + '<output-file>/tmp/claude/tasks/bs35z6i31.output</output-file>\n<status>completed</status>\n</task-notification>';
+  assert.equal(cleanPrompt(notif), null, 'a task-notification is not a prompt');
+  assert.equal(cleanPrompt('<command-name>/design-login</command-name>'), null, 'a slash-command echo is not a prompt');
+  assert.equal(cleanPrompt('<system-reminder>be nice</system-reminder>'), null, 'a reminder is not a prompt');
+  // a teammate hand-off keeps its instruction, loses the wrapper
+  assert.equal(cleanPrompt('<teammate-message teammate_id="team-lead-frontend-review">scope=frontend, verify the build</teammate-message>'),
+    'scope=frontend, verify the build');
+  assert.equal(cleanPrompt('배포 스크립트 좀 고쳐줘'), '배포 스크립트 좀 고쳐줘', 'a real prompt is untouched');
+});
