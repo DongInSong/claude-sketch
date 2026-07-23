@@ -2326,14 +2326,12 @@ function drawLive(){
   for (const s of marks) if (s.k <= 0) point(s);
 }
 
-/* ══ the doodle — the crayon says what main is doing ══
+/* ══ the doodle — a folded-paper sticker for what main is doing ══
    File work draws on its file; this is for the rest — a shell command, a browser,
    a query, a search — the activity that lands on no file and so left the panel
-   showing that main was busy but not at what. One small glyph for main's current
-   act, drawn on and wobbling, rubbed out when the work changes or stops, then the
-   next drawn in its place. */
-const DOO_MS = 300;
-const dooEase = p => p <= 0 ? 0 : p >= 1 ? 1 : 1 - (1 - p) * (1 - p);
+   showing that main was busy but not at what. A chit of coloured paper stuck
+   askew at the right of main's row, its word in a rascal's hand, fluttering in a
+   few stop-motion frames, flipping over to the next when the work changes. */
 const ACT_COL = (a) => ({
   read: PAL.read, search: PAL.grep, edit: PAL.edit, del: PAL.del,
   git: PAL.bash, test: PAL.good, build: PAL.warn, install: PAL.grep, run: PAL.ink2,
@@ -2364,38 +2362,53 @@ const GLYPHS = {
   delegate:(c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.85,y+r*0.55],[x+r*0.35,y-r*0.5]]); dStroke(c,d,[[x+r*0.35,y-r*0.5],[x-r*0.02,y-r*0.5]]); dStroke(c,d,[[x+r*0.35,y-r*0.5],[x+r*0.35,y-r*0.05]]); dDot(c,x+r*0.72,y-r*0.72,r*0.28); },
   del:     (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.7,y-r*0.7],[x+r*0.7,y+r*0.7]]); dStroke(c,d,[[x+r*0.7,y-r*0.7],[x-r*0.7,y+r*0.7]]); },
 };
-function drawGlyph(c, act, x, y, r, alpha){
-  const g = GLYPHS[act]; if (!g) return;
-  c.save();
-  c.globalAlpha = alpha; c.strokeStyle = ACT_COL(act); c.fillStyle = ACT_COL(act);
-  c.lineWidth = 2.2; c.lineJoin = 'round'; c.lineCap = 'round';
-  g(c, x, y, r, mulberry(hash(act)));
+const DOO = { act: null, prev: null, flipAt: 0 };
+const dooBusy = () => !!(DOO.act || DOO.prev);
+const CHIT = 30;              // the square of coloured paper
+const FLIP_MS = 260;          // how long a change takes to flip over
+const STOP_MS = 170;          // frame step of the stop-motion flutter
+// three poses it snaps between — a paper sticker never sits quite still
+const POSES = [[0, 0, 0], [0.05, 0.8, -0.6], [-0.035, -0.7, 0.8]];
+// 1 → 0 → 1 in a few hard steps, so the flip reads as stop-motion, not a spin
+const FLIP_SEQ = [1, 0.62, 0.16, 0.16, 0.62, 1];
+const flipStep = p => FLIP_SEQ[Math.min(FLIP_SEQ.length-1, Math.floor(p * (FLIP_SEQ.length-1) + 1e-6))];
+const handFont = () => css().getPropertyValue('--hand').trim() || 'cursive';
+
+// a chit of coloured paper: a drop shadow, the paper, a folded-over corner, and
+// the activity cut into it in white
+function drawPaper(c, cx, cy, act){
+  const col = ACT_COL(act), s = CHIT/2, fold = CHIT*0.36;
+  c.save(); c.lineJoin = 'round'; c.lineCap = 'round';
+  c.fillStyle = 'rgba(40,30,20,0.18)';                       // shadow
+  c.beginPath(); c.roundRect(cx-s+2, cy-s+3, CHIT, CHIT, 4); c.fill();
+  c.fillStyle = col;                                          // the paper
+  c.beginPath(); c.roundRect(cx-s, cy-s, CHIT, CHIT, 4); c.fill();
+  c.fillStyle = 'rgba(0,0,0,0.16)';                           // the folded-back corner
+  c.beginPath(); c.moveTo(cx+s-fold, cy-s); c.lineTo(cx+s, cy-s+fold); c.lineTo(cx+s, cy-s); c.closePath(); c.fill();
+  c.strokeStyle = 'rgba(0,0,0,0.22)'; c.lineWidth = 1;
+  c.beginPath(); c.moveTo(cx+s-fold, cy-s); c.lineTo(cx+s, cy-s+fold); c.stroke();
+  const g = GLYPHS[act];                                      // the activity, in white
+  if (g){ c.strokeStyle = '#fff'; c.fillStyle = '#fff'; c.lineWidth = 2; c.globalAlpha = 0.95;
+    g(c, cx, cy+1, 8.5, mulberry(hash(act))); }
   c.restore();
 }
 
-const DOO = { act: null, born: 0, prev: null, prevAt: 0 };
-const dooBusy = () => !!(DOO.act || DOO.prev);
-// a short crayon arrow from the stamp back to the end of main's row — right after
-// the output token count, the nearest thing to it — so it reads as main's without
-// a line drawn across the model name and the counts.
-function doodleArrow(c, sx, sy, tx, ty, col, seed){
-  const mx = (sx + tx) / 2, my = Math.min(sy, ty) - 7;   // a gentle arc, all in the empty space
-  c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
-  for (const [w, a, cc] of [[7, 0.6, PAL.paper], [2.3, 0.9, col]]){    // paper under, then ink
-    const rnd = mulberry(seed);                 // same seed → the two share the wobble
-    c.globalAlpha = a; c.strokeStyle = cc; c.lineWidth = w;
-    c.beginPath(); wavyLine(c, sx, sy, mx, my, rnd, 1.1); wavyLine(c, mx, my, tx, ty, rnd, 1.1); c.stroke();
-  }
-  const rnd = mulberry(seed + 7);
-  const dx = tx - mx, dy = ty - my, len = Math.hypot(dx, dy) || 1, ux = dx/len, uy = dy/len;
-  c.strokeStyle = col; c.lineWidth = 2.3; c.globalAlpha = 0.9;
-  for (const ang of [2.5, -2.5]){                // two-stroke head at the tip
-    const hx = tx + (ux*Math.cos(ang) - uy*Math.sin(ang))*10;
-    const hy = ty + (ux*Math.sin(ang) + uy*Math.cos(ang))*10;
-    c.beginPath(); wavyLine(c, tx, ty, hx, hy, rnd, 1.1); c.stroke();
+// the word ending at rightX, each letter kicked off the line — a rascal's hand
+function drawWord(c, word, rightX, cy, col){
+  c.font = '800 16px ' + handFont();
+  const total = c.measureText(word).width + word.length * 1.5;
+  let x = rightX - total;
+  c.save(); c.fillStyle = col; c.textBaseline = 'middle'; c.textAlign = 'left';
+  for (let i = 0; i < word.length; i++){
+    const ch = word[i], cw = c.measureText(ch).width, rnd = mulberry(hash(word) + i*131);
+    c.save(); c.translate(x + cw/2, cy + (rnd()-0.5)*5); c.rotate((rnd()-0.5)*0.42);
+    c.fillText(ch, -cw/2, 0); c.restore();
+    x += cw + 1.5;
   }
   c.restore();
+  return total;
 }
+
 function drawDoodle(){
   const cv = $('doodle'); if (!cv) return;
   const W = cv.clientWidth, H = cv.clientHeight;
@@ -2406,38 +2419,29 @@ function drawDoodle(){
   const now = Date.now();
   const main = S && S.ready && S.agents.get('main');
   const want = (main && main.lastTs && now - main.lastTs < NOW_MS) ? (main.lastAct || main.lastOp) : null;
-  if (want !== DOO.act){ if (DOO.act){ DOO.prev = DOO.act; DOO.prevAt = now; } DOO.act = want; DOO.born = now; }
-  if (DOO.prev && now - DOO.prevAt >= ERASE_MS) DOO.prev = null;
-  if (!DOO.act && !DOO.prev) return;
+  if (want !== DOO.act){ if (DOO.act){ DOO.prev = DOO.act; DOO.flipAt = now; } DOO.act = want; }
+  const flipP = DOO.flipAt ? Math.min(1, (now - DOO.flipAt)/FLIP_MS) : 1;
+  if (flipP >= 1) DOO.prev = null;
+  const show = (flipP < 0.5 && DOO.prev) ? DOO.prev : DOO.act;   // swap at the narrowest point of the flip
+  if (!show) return;
 
-  // the end of main's row — right after the out-token count — is what the arrow
-  // points at, and the stamp sits just past it, in the empty space
+  // level with main's row, hard against the right edge — a sticker on the line
   const cr = cv.getBoundingClientRect();
-  const tk = document.querySelector('#agents .agl .tk');
-  let tipX = W - 170, tipY = 22;
-  if (tk){ const r0 = tk.getBoundingClientRect(); tipX = r0.right - cr.left; tipY = r0.top - cr.top + r0.height/2; }
-  const r = 15, cy = tipY, gx = Math.min(tipX + 84, W - 80);   // stamp just past the tokens, on their row
-  // the one on its way out, being rubbed out
-  if (DOO.prev){
-    drawGlyph(c, DOO.prev, gx, cy, r, 1);
-    rubOut(c, { x: gx-r-6, y: cy-r-6, w: 2*r+12, h: 2*r+12 }, hash(DOO.prev)+9, (now-DOO.prevAt)/ERASE_MS);
-  }
-  // the current one: the arrow back to main, then the stamp, tilted and wobbling
-  if (DOO.act){
-    const prog = dooEase(Math.min(1, (now-DOO.born)/DOO_MS));
-    const sh = shake();
-    c.save(); c.globalAlpha = prog;
-    doodleArrow(c, gx - r - 8 + sh.x, cy + sh.y, tipX + 7, tipY, ACT_COL(DOO.act), hash('arw' + DOO.act));
-    c.restore();
-    c.save();
-    c.translate(gx + sh.x, cy + sh.y); c.rotate(-0.09 + sh.a); c.translate(-gx, -cy);
-    drawGlyph(c, DOO.act, gx, cy, r, prog);
-    c.globalAlpha = prog; c.fillStyle = ACT_COL(DOO.act);
-    c.font = '700 16px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
-    c.textAlign = 'left'; c.textBaseline = 'middle';
-    c.fillText(ACT_WORD(DOO.act), gx + r + 7, cy + 1);
-    c.restore();
-  }
+  const row = document.querySelector('#agents .agl');
+  let cy = 22;
+  if (row){ const r0 = row.getBoundingClientRect(); cy = r0.top - cr.top + r0.height/2; }
+  const chitCX = W - 14 - CHIT/2;
+
+  const pose = POSES[Math.floor(now / STOP_MS) % POSES.length];
+  const flipS = flipStep(flipP);
+  c.save();
+  c.translate(chitCX + pose[1], cy + pose[2]);
+  c.rotate(-0.16 + pose[0]);           // sits askew
+  c.scale(flipS, 1);                   // flips on a change
+  c.translate(-chitCX, -cy);
+  drawPaper(c, chitCX, cy, show);
+  drawWord(c, ACT_WORD(show), chitCX - CHIT/2 - 8, cy, ACT_COL(show));
+  c.restore();
 }
 
 // The loop only runs while something is live — an idle page draws nothing.
