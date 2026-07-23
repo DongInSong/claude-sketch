@@ -302,6 +302,8 @@
 
   .statline{margin:8px 0 0;color:var(--ink2);font-size:17px;font-variant-numeric:tabular-nums}
   .statline b{color:var(--ink)}
+  /* the crayon doodle: what main is doing right now, drawn beside the agents */
+  .doodle{display:block;width:100%;max-width:230px;height:30px;margin:6px 0 0}
   .statline .alert{color:var(--bad);font-weight:700}
   .costline{font-size:15px;margin-top:3px;color:var(--ink3)}
   .costline .hint2{color:var(--ink3);font-size:13.5px}
@@ -568,6 +570,7 @@
   </div>
 
   <div class="agents" id="agents"></div>
+  <canvas id="doodle" class="doodle" aria-hidden="true"></canvas>
   <p class="statline" id="statline"></p>
   <p class="statline costline" id="costline"></p>
 
@@ -2319,14 +2322,96 @@ function drawLive(){
   for (const s of marks) if (s.k <= 0) point(s);
 }
 
+/* ══ the doodle — the crayon says what main is doing ══
+   File work draws on its file; this is for the rest — a shell command, a browser,
+   a query, a search — the activity that lands on no file and so left the panel
+   showing that main was busy but not at what. One small glyph for main's current
+   act, drawn on and wobbling, rubbed out when the work changes or stops, then the
+   next drawn in its place. */
+const DOO_MS = 300;
+const dooEase = p => p <= 0 ? 0 : p >= 1 ? 1 : 1 - (1 - p) * (1 - p);
+const ACT_COL = (a) => ({
+  read: PAL.read, search: PAL.grep, edit: PAL.edit, del: PAL.del,
+  git: PAL.bash, test: PAL.good, build: PAL.warn, install: PAL.grep, run: PAL.ink2,
+  web: PAL.grep, browse: PAL.read, data: PAL.heat, mcp: PAL.ink3, flow: PAL.heat, delegate: PAL.heat,
+})[a] || PAL.ink3;
+const ACT_WORD = (a) => ({ search: 'grep', delegate: 'task', data: 'db' })[a] || a;
+
+// each glyph draws crayon strokes centred at (x,y), radius r; the caller has set
+// the colour, width and alpha, and translated into the wobble
+function dStroke(c, rnd, pts){ for (let i = 0; i < pts.length - 1; i++){ c.beginPath();
+  wavyLine(c, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1], rnd, 0.8); c.stroke(); } }
+function dRing(c, x, y, rr){ c.beginPath(); c.arc(x, y, rr, 0, Math.PI*2); c.stroke(); }
+function dDot(c, x, y, rr){ c.beginPath(); c.arc(x, y, rr, 0, Math.PI*2); c.fill(); }
+const GLYPHS = {
+  read:    (c,x,y,r)=>{ c.beginPath(); c.ellipse(x,y,r,r*0.62,0,0,Math.PI*2); c.stroke(); dDot(c,x,y,r*0.3); },
+  search:  (c,x,y,r,d)=>{ dRing(c,x-r*0.2,y-r*0.2,r*0.62); dStroke(c,d,[[x+r*0.25,y+r*0.25],[x+r*0.95,y+r*0.95]]); },
+  edit:    (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.8,y+r*0.8],[x+r*0.6,y-r*0.75]]); dStroke(c,d,[[x+r*0.6,y-r*0.75],[x+r*0.9,y-r*0.42],[x+r*0.25,y-r*0.12]]); },
+  git:     (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.5,y-r*0.85],[x-r*0.5,y+r*0.85]]); dStroke(c,d,[[x-r*0.5,y+r*0.05],[x+r*0.55,y-r*0.55]]); dDot(c,x-r*0.5,y-r*0.85,r*0.26); dDot(c,x-r*0.5,y+r*0.85,r*0.26); dDot(c,x+r*0.55,y-r*0.55,r*0.26); },
+  test:    (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.75,y+r*0.05],[x-r*0.12,y+r*0.65],[x+r*0.85,y-r*0.7]]); },
+  build:   (c,x,y,r,d)=>{ c.save(); c.lineWidth=Math.max(c.lineWidth,3.4); dStroke(c,d,[[x-r*0.7,y-r*0.5],[x+r*0.5,y-r*0.5]]); c.restore(); dStroke(c,d,[[x-r*0.08,y-r*0.5],[x+r*0.18,y+r*0.85]]); },
+  install: (c,x,y,r,d)=>{ dStroke(c,d,[[x,y-r*0.9],[x,y+r*0.3]]); dStroke(c,d,[[x-r*0.42,y-r*0.1],[x,y+r*0.36],[x+r*0.42,y-r*0.1]]); dStroke(c,d,[[x-r*0.7,y+r*0.8],[x+r*0.7,y+r*0.8]]); },
+  run:     (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.6,y-r*0.55],[x-r*0.02,y],[x-r*0.6,y+r*0.55]]); dStroke(c,d,[[x+r*0.18,y+r*0.55],[x+r*0.8,y+r*0.55]]); },
+  web:     (c,x,y,r,d)=>{ dRing(c,x,y,r*0.85); c.beginPath(); c.ellipse(x,y,r*0.4,r*0.85,0,0,Math.PI*2); c.stroke(); dStroke(c,d,[[x-r*0.82,y],[x+r*0.82,y]]); },
+  browse:  (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.9,y-r*0.7],[x+r*0.9,y-r*0.7],[x+r*0.9,y+r*0.75],[x-r*0.9,y+r*0.75],[x-r*0.9,y-r*0.72]]); dStroke(c,d,[[x-r*0.9,y-r*0.28],[x+r*0.9,y-r*0.28]]); dDot(c,x-r*0.6,y-r*0.5,r*0.13); dDot(c,x-r*0.28,y-r*0.5,r*0.13); },
+  data:    (c,x,y,r,d)=>{ c.beginPath(); c.ellipse(x,y-r*0.55,r*0.8,r*0.32,0,0,Math.PI*2); c.stroke(); dStroke(c,d,[[x-r*0.8,y-r*0.55],[x-r*0.8,y+r*0.55]]); dStroke(c,d,[[x+r*0.8,y-r*0.55],[x+r*0.8,y+r*0.55]]); c.beginPath(); c.ellipse(x,y+r*0.55,r*0.8,r*0.32,0,0,Math.PI); c.stroke(); },
+  mcp:     (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.5,y-r*0.9],[x-r*0.5,y-r*0.2]]); dStroke(c,d,[[x+r*0.5,y-r*0.9],[x+r*0.5,y-r*0.2]]); dStroke(c,d,[[x-r*0.75,y-r*0.2],[x+r*0.75,y-r*0.2],[x+r*0.75,y+r*0.35],[x-r*0.75,y+r*0.35],[x-r*0.75,y-r*0.22]]); dStroke(c,d,[[x,y+r*0.35],[x,y+r*0.9]]); },
+  flow:    (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.7,y-r*0.6],[x+r*0.7,y-r*0.6]]); dStroke(c,d,[[x-r*0.7,y-r*0.6],[x,y+r*0.72]]); dStroke(c,d,[[x+r*0.7,y-r*0.6],[x,y+r*0.72]]); dDot(c,x-r*0.7,y-r*0.6,r*0.28); dDot(c,x+r*0.7,y-r*0.6,r*0.28); dDot(c,x,y+r*0.72,r*0.28); },
+  delegate:(c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.85,y+r*0.55],[x+r*0.35,y-r*0.5]]); dStroke(c,d,[[x+r*0.35,y-r*0.5],[x-r*0.02,y-r*0.5]]); dStroke(c,d,[[x+r*0.35,y-r*0.5],[x+r*0.35,y-r*0.05]]); dDot(c,x+r*0.72,y-r*0.72,r*0.28); },
+  del:     (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.7,y-r*0.7],[x+r*0.7,y+r*0.7]]); dStroke(c,d,[[x+r*0.7,y-r*0.7],[x-r*0.7,y+r*0.7]]); },
+};
+function drawGlyph(c, act, x, y, r, alpha){
+  const g = GLYPHS[act]; if (!g) return;
+  c.save();
+  c.globalAlpha = alpha; c.strokeStyle = ACT_COL(act); c.fillStyle = ACT_COL(act);
+  c.lineWidth = 2.2; c.lineJoin = 'round'; c.lineCap = 'round';
+  g(c, x, y, r, mulberry(hash(act)));
+  c.restore();
+}
+
+const DOO = { act: null, born: 0, prev: null, prevAt: 0 };
+const dooBusy = () => !!(DOO.act || DOO.prev);
+function drawDoodle(){
+  const cv = $('doodle'); if (!cv) return;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  const DPR = Math.min(devicePixelRatio || 1, 2);
+  cv.width = W*DPR; cv.height = H*DPR;
+  const c = cv.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0); c.clearRect(0,0,W,H);
+  const now = Date.now();
+  const main = S && S.ready && S.agents.get('main');
+  const want = (main && main.lastTs && now - main.lastTs < NOW_MS) ? (main.lastAct || main.lastOp) : null;
+  if (want !== DOO.act){ if (DOO.act){ DOO.prev = DOO.act; DOO.prevAt = now; } DOO.act = want; DOO.born = now; }
+  if (DOO.prev && now - DOO.prevAt >= ERASE_MS) DOO.prev = null;
+  const r = Math.min(H*0.34, 12), gx = 6 + r, cy = H/2;
+  // the one on its way out, being rubbed out
+  if (DOO.prev){
+    drawGlyph(c, DOO.prev, gx, cy, r, 1);
+    rubOut(c, { x: gx-r-5, y: cy-r-5, w: 2*r+10, h: 2*r+10 }, hash(DOO.prev)+9, (now-DOO.prevAt)/ERASE_MS);
+  }
+  // the current one, drawing in and wobbling, with its word beside it
+  if (DOO.act){
+    const prog = dooEase(Math.min(1, (now-DOO.born)/DOO_MS));
+    const sh = shake();
+    c.save(); c.translate(sh.x, sh.y); c.rotate(sh.a);
+    drawGlyph(c, DOO.act, gx, cy, r, prog);
+    c.globalAlpha = prog; c.fillStyle = ACT_COL(DOO.act);
+    c.font = '700 15px ' + (css().getPropertyValue('--hand').trim() || 'cursive');
+    c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillText(ACT_WORD(DOO.act), gx + r + 7, cy + 1);
+    c.restore();
+  }
+}
+
 // The loop only runs while something is live — an idle page draws nothing.
 let boilT = null;
 function kickBoil(){
-  drawLive();
-  if (REDUCED || boilT || nowLeft() <= 0) return;
+  drawLive(); drawDoodle();
+  if (REDUCED || boilT) return;
+  if (nowLeft() <= 0 && !dooBusy()) return;
   boilT = setInterval(() => {
-    drawLive();
-    if (nowLeft() <= 0){ clearInterval(boilT); boilT = null; }
+    drawLive(); drawDoodle();
+    if (nowLeft() <= 0 && !dooBusy()){ clearInterval(boilT); boilT = null; }
   }, 50);      // frame step: fast enough for the rubber to move
 }
 
