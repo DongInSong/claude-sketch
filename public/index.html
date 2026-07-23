@@ -2337,7 +2337,26 @@ const ACT_COL = (a) => ({
   git: PAL.bash, test: PAL.good, build: PAL.warn, install: PAL.grep, run: PAL.ink2,
   web: PAL.grep, browse: PAL.read, data: PAL.heat, mcp: PAL.ink3, flow: PAL.heat, delegate: PAL.heat,
 })[a] || PAL.ink3;
-const ACT_WORD = (a) => ({ search: 'grep', delegate: 'task', data: 'db' })[a] || a;
+// what the sticker says — a cheeky little "…ing!" per activity, in the page's
+// language, not the bare op name
+const SAY = {
+  read:    { en:'peeking!',     ko:'쓱 보는 중!', ja:'のぞき中!',   zh:'偷看中!' },
+  search:  { en:'digging!',     ko:'뒤지는 중!',  ja:'探索中!',     zh:'翻找中!' },
+  edit:    { en:'tweaking!',    ko:'고치는 중!',  ja:'いじり中!',   zh:'改改中!' },
+  git:     { en:'committing!',  ko:'커밋 중!',    ja:'コミット中!', zh:'提交中!' },
+  test:    { en:'checking!',    ko:'확인 중!',    ja:'確認中!',     zh:'检查中!' },
+  build:   { en:'hammering!',   ko:'뚝딱 중!',    ja:'ビルド中!',   zh:'构建中!' },
+  install: { en:'grabbing!',    ko:'챙기는 중!',  ja:'導入中!',     zh:'安装中!' },
+  run:     { en:'running!',     ko:'돌리는 중!',  ja:'実行中!',     zh:'运行中!' },
+  web:     { en:'googling!',    ko:'검색 중!',    ja:'ググり中!',   zh:'搜索中!' },
+  browse:  { en:'poking!',      ko:'구경 중!',    ja:'見物中!',     zh:'逛逛中!' },
+  data:    { en:'querying!',    ko:'캐는 중!',    ja:'照会中!',     zh:'查库中!' },
+  mcp:     { en:'fiddling!',    ko:'만지는 중!',  ja:'操作中!',     zh:'调用中!' },
+  flow:    { en:'wrangling!',   ko:'굴리는 중!',  ja:'采配中!',     zh:'编排中!' },
+  delegate:{ en:'handing off!', ko:'시키는 중!',  ja:'おまかせ中!', zh:'派活中!' },
+  del:     { en:'zapping!',     ko:'지우는 중!',  ja:'削除中!',     zh:'删除中!' },
+};
+const ACT_WORD = (a) => (SAY[a] && (SAY[a][LANG] || SAY[a].en)) || a;
 
 // each glyph draws crayon strokes centred at (x,y), radius r; the caller has set
 // the colour, width and alpha, and translated into the wobble
