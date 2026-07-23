@@ -173,3 +173,21 @@ test('a watch that cannot be set up leaves the poll running', (t) => {
   assert.equal(s.watchers.length, 0, 'stop() left a watcher behind');
   assert.equal(s.timer, null);
 });
+
+// A typed prompt and a queued one carry no tool_use/usage marker, so the tailer's
+// line filter used to skip them before the parser ever saw them — the title was
+// left to last-prompt records, which lag a turn behind the question asked.
+test('a typed prompt reaches the parser and titles the session', (t) => {
+  const dir = mkdir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { s, fp } = opened(dir);
+  const prompt = (text, at) => JSON.stringify({ type: 'user', timestamp: at,
+    message: { role: 'user', content: text } }) + '\n';
+  fs.writeFileSync(fp, prompt('older question', '2026-01-01T00:00:00Z')
+    + prompt('the newest question', '2026-01-01T00:01:00Z'));
+  s.scan();
+  const titles = s.events.filter(e => e.t === 'title').map(e => e.title);
+  assert.ok(titles.includes('the newest question'),
+    'the typed prompt never reached the parser, so the title never updated to it');
+  assert.equal(titles.at(-1), 'the newest question', 'the newest prompt is the title');
+});

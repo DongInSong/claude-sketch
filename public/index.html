@@ -1431,7 +1431,18 @@ async function loadUniverse(){
 async function loadSessions(){
   try{
     const r = await api('/api/sessions' + q());
+    // The open session's title is the parser's, kept live off the event stream
+    // over the whole transcript. The poll reads only the tail and can lag it by a
+    // question while one is arriving, so letting it overwrite made the two take
+    // turns — the label flicked from the newest question to the one before and
+    // back on every poll. Keep the parser's for the session on screen; the poll
+    // still names all the others.
+    const held = S && SESSIONS.find(x => x.id === S.id);
     SESSIONS = r.sessions || [];
+    if (held && held.title){
+      const cur = SESSIONS.find(x => x.id === S.id);
+      if (cur) cur.title = held.title;
+    }
     OFFLINE = false;
   }catch(e){
     // A 404 is the server telling us it does not know this folder — the saved
