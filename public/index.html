@@ -2460,12 +2460,11 @@ function drawDoodle(){
 
   const pose = POSES[Math.floor(now / STOP_MS) % POSES.length];
   const flipS = flipStep(flipP);
-  const tilt = -0.14 + pose[0];
-  // a soft crayon patch behind the whole thing, tilted with it but not flipped —
-  // so the paper reads as stuck onto a little coloured backing
+  const tilt = 0.14 + pose[0];
+  // a highlighter swipe behind the word, tilted with it but not flipped
   c.save();
   c.translate(pivotX + pose[1], cy + pose[2]); c.rotate(tilt); c.translate(-pivotX, -cy);
-  drawBackdrop(c, leftX - 9, chitCX + CHIT/2 + 7, cy, ACT_COL(show));
+  drawBackdrop(c, leftX - 4, leftX + ww + 5, cy, ACT_COL(show));
   c.restore();
   // the word and the paper, flipping over on a change
   c.save();
@@ -2474,17 +2473,28 @@ function drawDoodle(){
   drawPaper(c, chitCX, cy, show);
   c.restore();
 }
-// a low, crayon-hatched wash the sticker sits on
+// a small, messy scribble the sticker sits on — coloured in by hand, in a hurry,
+// a highlighter swipe behind the word — translucent passes that overlap into
+// streaks, ragged ends, a darker bite along the lower edge: what a marker leaves
 function drawBackdrop(c, x0, x1, cy, col){
-  const h = CHIT + 10, y = cy - h/2, w = x1 - x0;
-  c.save();
-  c.globalAlpha = 0.13; c.fillStyle = col;                       // the wash
-  c.beginPath(); c.roundRect(x0, y, w, h, 9); c.fill();
-  c.beginPath(); c.roundRect(x0, y, w, h, 9); c.clip();          // texture, clipped to it
-  c.globalAlpha = 0.09; c.strokeStyle = col; c.lineWidth = 4; c.lineCap = 'round';
-  const rnd = mulberry(1234);
+  const rnd = mulberry(1234);                     // stable, so it doesn't crawl
+  const h = 18, y = cy - 1;                        // band ≈ the text line, sat a touch low
+  const xa = x0 - 3 + (rnd()-0.5)*4, xb = x1 + 4 + (rnd()-0.5)*5;   // uneven ends
+  c.save(); c.strokeStyle = col; c.lineCap = 'round';
+  // main pass, laid down in overlapping segments so the ink builds up unevenly
+  c.globalAlpha = 0.12; c.lineWidth = h;
+  const seg = 5;
+  for (let i = 0; i < seg; i++){
+    c.beginPath();
+    c.moveTo(xa + (i/seg)*(xb-xa),     y + (rnd()-0.5)*3);
+    c.lineTo(xa + ((i+1)/seg)*(xb-xa), y + (rnd()-0.5)*3);
+    c.stroke();
+  }
+  // a darker streak along the lower edge, where the chisel bites harder
+  c.globalAlpha = 0.14; c.lineWidth = h*0.4;
   c.beginPath();
-  for (let sx = x0 - h; sx < x1; sx += 7){ const j = (rnd()-0.5)*2.4; c.moveTo(sx+j, y+h); c.lineTo(sx+h+j, y); }
+  c.moveTo(xa + 3, y + h*0.24);
+  for (let i = 1; i <= seg; i++) c.lineTo(xa + 3 + (i/seg)*(xb-xa-6), y + h*0.24 + (rnd()-0.5)*2.4);
   c.stroke();
   c.restore();
 }
