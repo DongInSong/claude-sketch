@@ -305,7 +305,7 @@
   /* the crayon doodle: what main is doing right now, stamped into the empty
      space by the agents — an overlay, so it takes no room and pushes nothing */
   .agentsbox{position:relative}
-  .doodle{position:absolute;left:0;top:-8px;width:100%;height:calc(100% + 8px);pointer-events:none;z-index:3}
+  .doodle{position:absolute;left:0;top:-20px;width:100%;height:calc(100% + 20px);pointer-events:none;z-index:3}
   .statline .alert{color:var(--bad);font-weight:700}
   .costline{font-size:15px;margin-top:3px;color:var(--ink3)}
   .costline .hint2{color:var(--ink3);font-size:13.5px}
@@ -2375,24 +2375,28 @@ function drawGlyph(c, act, x, y, r, alpha){
 
 const DOO = { act: null, born: 0, prev: null, prevAt: 0 };
 const dooBusy = () => !!(DOO.act || DOO.prev);
-// a crayon arrow from the stamp back to the main label, arced over the row, so
-// the glyph floating in the empty space reads as "this is what main is doing"
-function doodleArrow(c, sx, sy, tx, ty, col, seed){
-  const mx = (sx + tx) / 2, my = Math.min(sy, ty) - 9;   // lift the midpoint into an arc
+// a crayon arrow from the stamp back to the main label. It rides up into the
+// empty margin above the row and comes down onto "main" — so it never crosses
+// the model name and token counts that fill the row between them.
+function doodleArrow(c, sx, sy, mcx, mcy, col, seed){
+  const topY = Math.min(sy, mcy) - 20;         // ride high, clear of the row's text
+  const tx = mcx, ty = mcy - 6;                // land on the top of the "main" label
+  const pts = [[sx, sy], [sx - 22, topY], [tx + 8, topY], [tx, ty]];   // up, across high, down
   c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
-  for (const [w, a, cc] of [[7, 0.7, PAL.paper], [2.4, 0.9, col]]){   // paper under, then ink
+  for (const [w, a, cc] of [[7, 0.6, PAL.paper], [2.3, 0.9, col]]){    // paper under, then ink
     const rnd = mulberry(seed);                 // same seed → the two share the wobble
     c.globalAlpha = a; c.strokeStyle = cc; c.lineWidth = w;
-    c.beginPath(); wavyLine(c, sx, sy, mx, my, rnd, 1.4); c.stroke();
-    c.beginPath(); wavyLine(c, mx, my, tx, ty, rnd, 1.4); c.stroke();
+    c.beginPath();
+    for (let i = 0; i < pts.length-1; i++) wavyLine(c, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1], rnd, 1.2);
+    c.stroke();
   }
   const rnd = mulberry(seed + 7);
-  const dx = tx - mx, dy = ty - my, len = Math.hypot(dx, dy) || 1, ux = dx/len, uy = dy/len;
-  c.strokeStyle = col; c.lineWidth = 2.4; c.globalAlpha = 0.9;
-  for (const ang of [2.5, -2.5]){                // two-stroke head at the tip
-    const hx = tx + (ux*Math.cos(ang) - uy*Math.sin(ang))*11;
-    const hy = ty + (ux*Math.sin(ang) + uy*Math.cos(ang))*11;
-    c.beginPath(); wavyLine(c, tx, ty, hx, hy, rnd, 1.2); c.stroke();
+  const px = pts[2][0], py = pts[2][1], dx = tx-px, dy = ty-py, len = Math.hypot(dx, dy) || 1, ux = dx/len, uy = dy/len;
+  c.strokeStyle = col; c.lineWidth = 2.3; c.globalAlpha = 0.9;
+  for (const ang of [2.5, -2.5]){                // two-stroke head at the tip, pointing down at main
+    const hx = tx + (ux*Math.cos(ang) - uy*Math.sin(ang))*10;
+    const hy = ty + (ux*Math.sin(ang) + uy*Math.cos(ang))*10;
+    c.beginPath(); wavyLine(c, tx, ty, hx, hy, rnd, 1.1); c.stroke();
   }
   c.restore();
 }
@@ -2413,8 +2417,8 @@ function drawDoodle(){
   // where the "main" label sits, so the arrow can point back at it
   const cr = cv.getBoundingClientRect();
   const mb = document.querySelector('#agents .agl b');
-  let mainR = 44, mainY = 18;
-  if (mb){ const r0 = mb.getBoundingClientRect(); mainR = r0.right - cr.left; mainY = r0.top - cr.top + r0.height/2; }
+  let mainCX = 40, mainY = 22;
+  if (mb){ const r0 = mb.getBoundingClientRect(); mainCX = (r0.left + r0.right)/2 - cr.left; mainY = r0.top - cr.top + r0.height/2; }
 
   const r = 15, cy = mainY, gx = W - 82;   // the stamp sits at the right, level with main's row
   // the one on its way out, being rubbed out
@@ -2427,7 +2431,7 @@ function drawDoodle(){
     const prog = dooEase(Math.min(1, (now-DOO.born)/DOO_MS));
     const sh = shake();
     c.save(); c.globalAlpha = prog;
-    doodleArrow(c, gx - r - 8 + sh.x, cy + sh.y, mainR + 7, mainY, ACT_COL(DOO.act), hash('arw' + DOO.act));
+    doodleArrow(c, gx - r - 8 + sh.x, cy + sh.y, mainCX, mainY, ACT_COL(DOO.act), hash('arw' + DOO.act));
     c.restore();
     c.save();
     c.translate(gx + sh.x, cy + sh.y); c.rotate(-0.09 + sh.a); c.translate(-gx, -cy);
