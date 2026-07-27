@@ -2331,12 +2331,17 @@ function drawLive(){
   for (const s of marks) if (s.k <= 0) point(s);
 }
 
-/* ══ the doodle — a folded-paper sticker for what main is doing ══
+/* ══ the doodle — a folded-paper sticker for what each agent is doing ══
    File work draws on its file; this is for the rest — a shell command, a browser,
    a query, a search — the activity that lands on no file and so left the panel
-   showing that main was busy but not at what. A chit of coloured paper stuck
-   askew at the right of main's row, its word in a rascal's hand, fluttering in a
-   few stop-motion frames, flipping over to the next when the work changes. */
+   showing that an agent was busy but not at what. A chit of coloured paper stuck
+   askew at the right of the row, its word in a rascal's hand, fluttering in a
+   few stop-motion frames, flipping over to the next when the work changes.
+
+   One per row, not one for main. Main is often the least busy thing in the panel
+   — during a fan-out it has handed everything over and is writing nothing at all
+   — so the one place the sticker was allowed to appear was the one row with
+   nothing to say, while ten agents underneath it worked in silence. */
 const ACT_COL = (a) => ({
   read: PAL.read, search: PAL.grep, edit: PAL.edit, del: PAL.del,
   git: PAL.bash, test: PAL.good, build: PAL.warn, install: PAL.grep, run: PAL.ink2,
@@ -2386,9 +2391,13 @@ const GLYPHS = {
   delegate:(c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.85,y+r*0.55],[x+r*0.35,y-r*0.5]]); dStroke(c,d,[[x+r*0.35,y-r*0.5],[x-r*0.02,y-r*0.5]]); dStroke(c,d,[[x+r*0.35,y-r*0.5],[x+r*0.35,y-r*0.05]]); dDot(c,x+r*0.72,y-r*0.72,r*0.28); },
   del:     (c,x,y,r,d)=>{ dStroke(c,d,[[x-r*0.7,y-r*0.7],[x+r*0.7,y+r*0.7]]); dStroke(c,d,[[x+r*0.7,y-r*0.7],[x-r*0.7,y+r*0.7]]); },
 };
-const DOO = { act: null, prev: null, flipAt: 0 };
-const dooBusy = () => !!(DOO.act || DOO.prev);
+// One sticker per agent, each with its own flip: agents change activity
+// independently, and a shared flip would have every sticker on the panel turn
+// over whenever any one of them did.
+const DOO = new Map();
+const dooBusy = () => DOO.size > 0;
 const CHIT = 30;              // the square of coloured paper
+const SUB_CHIT = 0.76;        // a task's chit, smaller than main's — the row is subordinate and so is its sticker
 const FLIP_MS = 260;          // how long a change takes to flip over
 const STOP_MS = 210;          // frame step of the stop-motion flutter
 // four poses it drifts through — a gentle bob, barely any spin, so it flutters
@@ -2434,6 +2443,24 @@ function drawWord(c, word, leftX, cy, col){
 }
 const wordWidth = (c, word) => { c.font = '800 16px ' + handFont(); return c.measureText(word).width + word.length * 1.5; };
 
+// What the row should be saying right now, and what it is still saying while the
+// paper turns over. Each agent's flip is its own; the state dies with the row.
+function dooShow(nm, want, now){
+  let d = DOO.get(nm);
+  if (!d){
+    if (!want) return null;
+    d = { act: null, prev: null, flipAt: 0 };
+    DOO.set(nm, d);
+  }
+  if (want !== d.act){ if (d.act){ d.prev = d.act; d.flipAt = now; } d.act = want; }
+  const flipP = d.flipAt ? Math.min(1, (now - d.flipAt)/FLIP_MS) : 1;
+  if (flipP >= 1) d.prev = null;
+  // swap at the narrowest point of the flip, so the change happens edge-on
+  const act = (flipP < 0.5 && d.prev) ? d.prev : d.act;
+  if (!act && !d.prev){ DOO.delete(nm); return null; }
+  return act ? { act, flipP } : null;
+}
+
 function drawDoodle(){
   const cv = $('doodle'); if (!cv) return;
   const W = cv.clientWidth, H = cv.clientHeight;
@@ -2441,48 +2468,73 @@ function drawDoodle(){
   const DPR = Math.min(devicePixelRatio || 1, 2);
   cv.width = W*DPR; cv.height = H*DPR;
   const c = cv.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0); c.clearRect(0,0,W,H);
+  if (!(S && S.ready)){ DOO.clear(); return; }
   const now = Date.now();
-  const main = S && S.ready && S.agents.get('main');
-  const want = (main && main.lastTs && now - main.lastTs < NOW_MS) ? (main.lastAct || main.lastOp) : null;
-  if (want !== DOO.act){ if (DOO.act){ DOO.prev = DOO.act; DOO.flipAt = now; } DOO.act = want; }
-  const flipP = DOO.flipAt ? Math.min(1, (now - DOO.flipAt)/FLIP_MS) : 1;
-  if (flipP >= 1) DOO.prev = null;
-  const show = (flipP < 0.5 && DOO.prev) ? DOO.prev : DOO.act;   // swap at the narrowest point of the flip
-  if (!show) return;
-
-  // just past the end of main's row — the word, then the paper — so it sits close
-  // to the counts rather than out at the far edge
   const cr = cv.getBoundingClientRect();
-  const tk = document.querySelector('#agents .agl .tk') || document.querySelector('#agents .agl');
-  let endX = W - 200, cy = 22;
-  if (tk){ const r0 = tk.getBoundingClientRect(); endX = r0.right - cr.left; cy = r0.top - cr.top + r0.height/2; }
-  const word = ACT_WORD(show);
-  const ww = wordWidth(c, word), groupW = ww + 9 + CHIT;
-  let leftX = endX + 16;
-  if (leftX + groupW > W - 6) leftX = W - 6 - groupW;    // clamp if the row runs wide
-  const chitCX = leftX + ww + 9 + CHIT/2;
-  const pivotX = leftX + groupW/2;
+  // The rows on screen are the list: an agent the panel folded away or dropped
+  // past its twelve has nowhere to stick a sticker, and takes its flip with it.
+  const live = new Set();
+  for (const row of document.querySelectorAll('#agents .agl[data-agent]')){
+    const nm = row.dataset.agent;
+    live.add(nm);
+    const a = S.agents.get(nm);
+    const want = (a && a.lastTs && now - a.lastTs < NOW_MS) ? (a.lastAct || a.lastOp) : null;
+    const s = dooShow(nm, want, now);
+    if (s) drawChit(c, W, row, cr, nm, s.act, s.flipP, now);
+  }
+  for (const nm of [...DOO.keys()]) if (!live.has(nm)) DOO.delete(nm);
+}
 
-  const pose = POSES[Math.floor(now / STOP_MS) % POSES.length];
+// One sticker, stuck just past the end of its row — the word, then the paper —
+// so it sits close to that row's counts rather than out at the far edge.
+function drawChit(c, W, row, cr, nm, act, flipP, now){
+  const k = nm === 'main' ? 1 : SUB_CHIT;
+  const tk = row.querySelector('.tk') || row;
+  // the last fragment, not the whole span: a narrow window wraps the counts, and
+  // the bounding box of a two-line inline is both lines at once — the sticker took
+  // its right edge from the long line and its centre from between the two, and
+  // came down across the middle of the row. The tail of the last line is where
+  // the row really ends, and the space beside it is what is free.
+  const rects = tk.getClientRects();
+  const r0 = rects.length ? rects[rects.length-1] : tk.getBoundingClientRect();
+  const endX = r0.right - cr.left, cy = r0.top - cr.top + r0.height/2;
+  const word = ACT_WORD(act);
+  // laid out at full size and scaled about the pivot, so the whole group — word,
+  // swipe and paper — shrinks together
+  const gap = 14*k;
+  let ww = wordWidth(c, word), groupW = ww + 9 + CHIT;
+  // No room for the word beside the row: the chit alone, rather than the whole
+  // group clamped back over the counts it is meant to sit next to.
+  if (endX + gap + groupW*k > W - 6){ ww = 0; groupW = CHIT; }
+  let pivotX = endX + gap + groupW*k/2;
+  if (pivotX + groupW*k/2 > W - 6) pivotX = W - 6 - groupW*k/2;   // the chit still has to fit
+  const leftX = pivotX - groupW/2;
+  const chitCX = leftX + groupW - CHIT/2;
+
+  // each row flutters to its own phase — a panel of them beating as one would
+  // read as a single blinking widget, not a wall of stuck-on paper
+  const pose = POSES[(Math.floor(now / STOP_MS) + hash(nm)) % POSES.length];
   const flipS = flipStep(flipP);
   const tilt = 0.14 + pose[0];
+  const set = (sx) => { c.translate(pivotX + pose[1], cy + pose[2]); c.rotate(tilt);
+    c.scale(k*sx, k); c.translate(-pivotX, -cy); };
   // a highlighter swipe behind the word, tilted with it but not flipped
-  c.save();
-  c.translate(pivotX + pose[1], cy + pose[2]); c.rotate(tilt); c.translate(-pivotX, -cy);
-  drawBackdrop(c, leftX - 4, leftX + ww + 5, cy, ACT_COL(show));
-  c.restore();
+  if (ww){
+    c.save(); set(1);
+    drawBackdrop(c, leftX - 4, leftX + ww + 5, cy, ACT_COL(act), hash(nm));
+    c.restore();
+  }
   // the word and the paper, flipping over on a change
-  c.save();
-  c.translate(pivotX + pose[1], cy + pose[2]); c.rotate(tilt); c.scale(flipS, 1); c.translate(-pivotX, -cy);
-  drawWord(c, word, leftX, cy, ACT_COL(show));
-  drawPaper(c, chitCX, cy, show);
+  c.save(); set(flipS);
+  if (ww) drawWord(c, word, leftX, cy, ACT_COL(act));
+  drawPaper(c, chitCX, cy, act);
   c.restore();
 }
 // a small, messy scribble the sticker sits on — coloured in by hand, in a hurry,
 // a highlighter swipe behind the word — translucent passes that overlap into
 // streaks, ragged ends, a darker bite along the lower edge: what a marker leaves
-function drawBackdrop(c, x0, x1, cy, col){
-  const rnd = mulberry(1234);                     // stable, so it doesn't crawl
+function drawBackdrop(c, x0, x1, cy, col, seed){
+  const rnd = mulberry(1234 + (seed|0));          // stable per row, so it doesn't crawl
   const h = 18, y = cy - 1;                        // band ≈ the text line, sat a touch low
   const xa = x0 - 3 + (rnd()-0.5)*4, xb = x1 + 4 + (rnd()-0.5)*5;   // uneven ends
   c.save(); c.strokeStyle = col; c.lineCap = 'round';
@@ -3422,6 +3474,9 @@ function renderAgents(){
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'al agl' + (on?' on':'') + (off?' off':'');
+    // the row's own name, for the sticker overlay: it anchors to the rows that
+    // are actually on screen, so a folded or dropped task takes its sticker with it
+    b.dataset.agent = nm;
     b.dataset.tip = tipBox(nm==='main'? 'main' : showAgent(nm),
       [[t('lblModel'), prettyModel(a.model)||'—'], [t('lblCalls'), String(a.count)],
        [t('lblIn'), fmtTok(a.tin)], [t('lblOut'), fmtTok(a.tout)],
