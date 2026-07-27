@@ -109,6 +109,113 @@ test('working is read from whose turn it is, not from the file clock', (t) => {
     'a turn left open for 40min is a crash, not a think, and would claim to be working for ever');
 });
 
+// Main hands a fan-out to background agents and its turn closes — it owes nothing
+// until they come back, so main really is idle. The session is not: measured here,
+// one main transcript sat still for 92 minutes with agents writing throughout, and
+// read against main alone it said "done · 1h ago" at its busiest. Then the
+// notification wakes main, which synthesises — a think and a page of prose, no tool
+// call — and that is wordless too, so the "done" carried straight through it.
+test('a session is live while its agents are, and while main writes them up', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-fan-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-fanroot-'));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  t.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const dir = path.join(home, 'projects', slugOf(root));
+  fs.mkdirSync(dir, { recursive: true });
+  const now = Date.now();
+  const mins = (n) => now - n * 60e3;
+  const at = (ms) => new Date(ms).toISOString();
+  const spawn = (id, ms) => JSON.stringify({ type: 'assistant', timestamp: at(ms),
+    message: { id: 'm' + id, model: 'opus', stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', id, name: 'Agent', input: { description: 'go and look' } }] } }) + '\n';
+  const launched = (id, ms) => JSON.stringify({ type: 'user', timestamp: at(ms),
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'agent started' }] } }) + '\n';
+  const stop = (ms) => JSON.stringify({ type: 'assistant', timestamp: at(ms),
+    message: { id: 'e' + ms, model: 'opus', stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'spawned; will report back' }] } }) + '\n';
+  const notified = (ms) => JSON.stringify({ type: 'user', timestamp: at(ms),
+    message: { role: 'user', content: '<task-notification>\n<task-id>wk1</task-id>\n'
+      + '<status>completed</status>\n<summary>agent finished</summary>\n</task-notification>' } }) + '\n';
+  const brief = (ms) => JSON.stringify({ type: 'user', timestamp: at(ms),
+    message: { role: 'user', content: 'scope=lib. Find every caller.' } }) + '\n';
+  const grepping = (ms) => JSON.stringify({ type: 'assistant', timestamp: at(ms),
+    message: { id: 'g' + ms, model: 'opus', stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', id: 'g' + ms, name: 'Grep', input: { pattern: 'x' } }] } }) + '\n';
+  const grepped = (ms) => launched('g' + ms, ms);
+  // how a workflow agent really ends: the StructuredOutput call *is* its return
+  // value, and nothing writes an end_turn after it — so its turn stays open for ever
+  const returned = (ms) => JSON.stringify({ type: 'assistant', timestamp: at(ms),
+    message: { id: 's' + ms, model: 'opus', stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', id: 's' + ms, name: 'StructuredOutput', input: { ok: true } }] } }) + '\n'
+    + launched('s' + ms, ms);
+
+  const write = (fp, body, mtime) => {
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.writeFileSync(fp, body);
+    fs.utimesSync(fp, new Date(mtime), new Date(mtime));
+    return fp;
+  };
+  const main = (id, body, mtime) => write(path.join(dir, id + '.jsonl'), body, mtime);
+  const agent = (id, hash, body, mtime) =>
+    write(path.join(dir, id, 'subagents', 'agent-' + hash + '.jsonl'), body, mtime);
+
+  // main spawned an agent an hour ago and has written nothing since — the whole
+  // of the false-idle this is about. The agent is mid-call: it grepped 4min ago
+  // and that call has not come back.
+  main('fanout', spawn('t1', mins(61)) + launched('t1', mins(61)) + stop(mins(60)), mins(60));
+  agent('fanout', 'a1', brief(mins(59)) + grepping(mins(4)), mins(4));
+
+  // same shape, but the agent finished: every call came back and it ended its
+  // turn. Nobody is working — this is a real "done".
+  main('landed', spawn('t2', mins(61)) + launched('t2', mins(61)) + stop(mins(60)), mins(60));
+  agent('landed', 'a2', brief(mins(59)) + grepping(mins(20)) + grepped(mins(20)) + stop(mins(19)), mins(19));
+
+  // the notification came back and main is writing it up: a think and a stream of
+  // prose, so the file has not moved for 2min and holds not one tool call
+  main('writeup', spawn('t3', mins(30)) + launched('t3', mins(30)) + stop(mins(29))
+    + notified(mins(2)), mins(2));
+  agent('writeup', 'a3',
+    brief(mins(28)) + grepping(mins(4)) + grepped(mins(4)) + stop(mins(3)), mins(3));
+
+  // an agent that returned its structured result and stopped there, ten minutes
+  // ago. Its turn never closes — 32% of the agent transcripts on this machine end
+  // that way — so read as main is, this session would claim to be working for half
+  // an hour after its fan-out was over.
+  main('returned', spawn('t4', mins(41)) + launched('t4', mins(41)) + stop(mins(40)), mins(40));
+  agent('returned', 'a4',
+    brief(mins(39)) + grepping(mins(12)) + grepped(mins(12)) + returned(mins(10)), mins(10));
+
+  const by = new Map(new Project(root).list().sessions.map(s => [s.id, s]));
+
+  assert.equal(by.get('fanout').active, true,
+    'a session whose agent is mid-call read as done — main had not written for an hour');
+  assert.equal(by.get('fanout').mainActive, false,
+    'main itself is genuinely idle there, and its own row has to keep saying so');
+  assert.ok(by.get('fanout').mtimeMs >= mins(4.1),
+    'the agent writing is the session moving: aged off main alone it read an hour stale');
+
+  assert.equal(by.get('landed').active, false,
+    'every agent finished and main stopped: that is done, and it must not read as live');
+
+  assert.equal(by.get('writeup').active, true,
+    'main synthesising after the notification read as done — the notification carries none of the user’s words');
+  assert.equal(by.get('writeup').mainActive, true, 'and it is main itself doing that work');
+
+  assert.equal(by.get('returned').active, false,
+    'an agent that returned its result and stopped left its turn open, and the session claimed to be working on it');
+
+  assert.deepEqual(new Project(root).list().sessions.map(s => s.id),
+    ['writeup', 'fanout', 'returned', 'landed'],
+    'the list is ordered by when the session last moved, agents included');
+});
+
 // Claude Code records the folder it was started in, which is often a corner of
 // the repository. That folder stays the session's identity; the repository is
 // what a path is named against.

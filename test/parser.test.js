@@ -179,6 +179,36 @@ test('local-command records do not open a turn', () => {
     'the command stdout opens nothing');
 });
 
+// A background task coming back is wordless, exactly like a slash-command echo,
+// and means the opposite: the harness has handed the results to the assistant and
+// the assistant is about to read them and write the answer. Read as silence, that
+// whole synthesis — a think and a stream of prose, often without one tool call in
+// it — was idle time, and the session said "done" all the way through it.
+test('a background task coming back opens the turn', () => {
+  const p = new SessionParser('/r');
+  const turns = (line) => p.parseLine(line, 'main').filter(e => e.t === 'open' || e.t === 'end');
+  const notif = '<task-notification>\n<task-id>wkynlthzh</task-id>\n'
+    + '<tool-use-id>toolu_01JJ1Fpoy1LCcZy9upjPwZDj</tool-use-id>\n'
+    + '<output-file>/tmp/claude/tasks/wkynlthzh.output</output-file>\n'
+    + '<status>completed</status>\n<summary>Dynamic workflow completed</summary>\n</task-notification>';
+
+  // main spawns an agent in the background and stops: it owes nothing until the
+  // results come back, so the turn genuinely closes here
+  assert.deepEqual(turns({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z',
+    message: { id: 'm1', stop_reason: 'end_turn', content: [{ type: 'text', text: 'spawned' }] } }),
+    [{ t: 'end', agent: 'main', ts: Date.parse('2026-01-01T00:00:00Z') }]);
+
+  const back = turns({ type: 'user', timestamp: '2026-01-01T00:30:00Z',
+    message: { role: 'user', content: notif } });
+  assert.deepEqual(back, [{ t: 'open', agent: 'main', ts: Date.parse('2026-01-01T00:30:00Z') }],
+    'the notification is not a prompt, but it is work owed — main is synthesising from here');
+
+  assert.deepEqual(turns({ type: 'assistant', timestamp: '2026-01-01T00:35:00Z',
+    message: { id: 'm2', stop_reason: 'end_turn', content: [{ type: 'text', text: 'here is what they found' }] } }),
+    [{ t: 'end', agent: 'main', ts: Date.parse('2026-01-01T00:35:00Z') }],
+    'and the answer it writes ends the turn as any other does');
+});
+
 // System records ride in on the user/queue channel — a background-task
 // notification, a slash-command echo, a teammate hand-off. cleanPrompt used to
 // strip only their tags, leaving the ids and paths inside a <task-notification>

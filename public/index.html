@@ -1139,8 +1139,12 @@ function applyEvent(ev, silent, replay){
   // live "working" signal for the session on screen — it holds through a think
   // that writes nothing, and drops the moment the turn ends, without waiting on
   // the /sessions poll. Not stored with the marks, so a filter rebuild leaves it.
-  if (ev.t === 'open'){ agentOf(ev.agent).turnOpen = true; return; }
-  if (ev.t === 'end'){ agentOf(ev.agent).turnOpen = false; return; }
+  // turnTs is when the turn last changed hands, and it is what says whether an
+  // open turn is a live one: an agent can be spawned, be given its brief and then
+  // sit in a single long call without recording an op at all, so lastTs alone has
+  // nothing to date it by and read it as stale.
+  if (ev.t === 'open'){ const a = agentOf(ev.agent); a.turnOpen = true; a.turnTs = ev.ts; return; }
+  if (ev.t === 'end'){ const a = agentOf(ev.agent); a.turnOpen = false; a.turnTs = ev.ts; return; }
   if (!replay && (ev.t === 'op' || ev.t === 'res')){
     // A dropped connection reconnects to a server that starts its backlog from
     // the top, so everything already on screen arrives a second time. Counting
@@ -1625,9 +1629,10 @@ document.addEventListener('mousemove', e=>{
 // screen (see isLive) flips the instant work starts or stops — including through
 // a long think or a streamed answer, when no tool call is arriving to prove it.
 // mtime alone could not: it read a long think as idle and a just-finished turn
-// as busy for a further 45s. A subagent, which has no such turn of its own, is
-// still judged by how lately it last did anything.
-const BUSY_MS = 45000;                     // a subagent quiet this long reads as done
+// as busy for a further 45s. An agent has a turn of its own too — it opens with
+// the brief it was given — so it is read the same way (agentBusy), on a shorter
+// leash because so many agent transcripts stop without ever closing theirs.
+const BUSY_MS = 45000;      // last resort: a session the list has not caught up with yet
 const NOW_MS = 20000;   // how long a highlight stays up — the same everywhere, so
                         // one event does not vanish from one panel while it sits in another
 const WARM_MS = 90000;                     // touched-lately files keep a quiet ring
@@ -3216,10 +3221,36 @@ function fmtAgo(ms){
 // no tool call on the wire. Everything else (other sessions, and the moment
 // after a turn ends before the turn signal is trusted) rides the server flag,
 // which reads the same turn state from the file's tail on the /sessions poll.
-function isLive(sess){
+//
+// Is main working, which is not the same question as whether the session is.
+function mainBusy(sess){
   if (S && S.id === sess.id && S.ready){
     const main = S.agents.get('main');
     if (main && main.turnOpen) return true;
+  }
+  return !!sess.mainActive;
+}
+// An agent's transcript often just stops: measured over 2267 of them, 32% never
+// write an end_turn at all — many end on the StructuredOutput call that is the
+// agent's return value — so an open turn has to expire on its own or a finished
+// fan-out would read as working for as long as the page was left open. Measured
+// across 84,759 quiet stretches inside agent transcripts, p99 is 82s and p99.9 is
+// 345s, so five minutes is what an agent really does between writes. (The server
+// puts the same bound on the same signal — see AGENT_QUIET.)
+const AGENT_QUIET = 5*60e3;
+const agentBusy = (a) => !!a.turnOpen
+  && Date.now() - Math.max(a.lastTs||0, a.turnTs||0) < AGENT_QUIET;
+// The session is live while anyone in it is working, and during a fan-out that
+// is nobody in main: main hands the work over and its turn closes, because
+// nothing is owed until the results come back. Read against main alone the badge
+// said "done" with ten agents mid-sentence — and went on saying it while main
+// wrote the synthesis, since the notification that woke it carries none of the
+// user's words and so opened no turn (see owesReply). An agent's turn opens with
+// the brief it was given and closes on its own end_turn, exactly as main's does.
+function isLive(sess){
+  if (mainBusy(sess)) return true;
+  if (S && S.id === sess.id && S.ready){
+    for (const [nm, a] of S.agents) if (nm !== 'main' && agentBusy(a)) return true;
   }
   return !!sess.active;
 }
@@ -3409,10 +3440,11 @@ function renderAgents(){
       + `</span> <span class="tk">${t('agentStats',{count:a.count, tin:fmtTok(a.tin), tout:fmtTok(a.tout)})}</span>`;
     b.addEventListener('click', ()=> setFilter(nm));
     box.appendChild(b);
-    if (nm === 'main'){                    // is the session working right now, and on what
-      // the same answer the badge in the session list gives — one idea of working
+    if (nm === 'main'){                    // is main working right now, and on what
+      // main's own turn, not the session's: while a fan-out runs the badge above
+      // says the session is live and this row says main is idle, and both are true
       const sess = SESSIONS.find(x => x.id === S.id);
-      const busy = sess ? isLive(sess) : !!(a.lastTs && Date.now() - a.lastTs < BUSY_MS);
+      const busy = sess ? mainBusy(sess) : !!(a.lastTs && Date.now() - a.lastTs < BUSY_MS);
       const bits = [busy ? `<span class="run">${t('mainRun')}</span>` : t('mainIdle')];
       if (a.lastOp){
         const f = a.lastOp === 'bash' ? String(a.lastFile).slice(0,28)+'…' : String(a.lastFile).split('/').pop();
@@ -3436,7 +3468,6 @@ function renderAgents(){
       const span = a.lastTs && a.firstTs ? a.lastTs - a.firstTs : 0;
       const dur = Math.max(paired, span);
       const started = tk.start || a.firstTs;
-      const stillMoving = a.lastTs && Date.now() - a.lastTs < 2*60e3;
       // A subagent can keep working after its first Task returns — resumed by the
       // parent, or running on past the result that unblocked it — and its
       // transcript goes on growing while tk.end (that first result) stays put. So
@@ -3444,7 +3475,14 @@ function renderAgents(){
       // quiet. Ops after tk.end mean it is going again, whatever the Task says —
       // else its span kept growing under a "done in 29m…" that never settled.
       const resumed = a.lastTs && tk.end && a.lastTs > tk.end;
-      const running = stillMoving && (!tk.end || resumed);
+      // Its own turn, the same signal the session badge is now read from, rather
+      // than "wrote something in the last two minutes": an agent three minutes
+      // into a Bash was called done on a page whose badge said live because of
+      // that very agent, and the row and the badge have to agree about who is
+      // working. A background Agent call returns the moment it is launched, so
+      // tk.end is no evidence there — hence resumed; a foreground Task's end is
+      // real, and holds.
+      const running = agentBusy(a) && (!tk.end || resumed);
       const bits = [];
       if (tk.desc) bits.push(`<span class="q">“${esc(tk.desc)}”</span>`);
       if (running) bits.push(`<span class="run">${t('taskRun')}</span>`);
